@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compose-stack:
+    name: Compose stack boots healthy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Create .env from example
+        run: cp .env.example .env
+
+      - name: Validate compose file
+        run: docker compose config --quiet
+
+      - name: Start stack and wait for healthchecks
+        run: docker compose up -d --wait --wait-timeout 180
+
+      - name: Show status
+        if: always()
+        run: docker compose ps
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
