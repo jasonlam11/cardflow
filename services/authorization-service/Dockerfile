@@ -18,9 +18,9 @@ FROM eclipse-temurin:25-jre-noble
 WORKDIR /app
 
 RUN groupadd --system app && useradd --system --gid app --no-create-home app
-COPY --from=build /src/target/ledger-service-*.jar app.jar
+COPY --from=build /src/target/authorization-service-*.jar app.jar
 USER app
 
-EXPOSE 8081
+EXPOSE 8082
 # Size the heap from the container's memory limit rather than the host's
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-jar", "/app/app.jar"]
