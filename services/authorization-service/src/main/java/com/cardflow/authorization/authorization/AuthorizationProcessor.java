@@ -7,6 +7,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.cardflow.authorization.authorization.AuthorizationDtos.AuthorizationRequest;
 import com.cardflow.authorization.card.CardAccount;
 import com.cardflow.authorization.card.CardAccountRepository;
+import com.cardflow.authorization.common.CorrelationIdFilter;
 import com.cardflow.authorization.outbox.EventEnvelope;
 import com.cardflow.authorization.outbox.OutboxWriter;
 
@@ -37,7 +38,7 @@ class AuthorizationProcessor {
 
         Decision decision = AuthorizationRules.decide(card, available, req.amountMinor(), req.currency());
 
-        String correlationId = MDC.get("correlationId");
+        String correlationId = MDC.get(CorrelationIdFilter.MDC_KEY);
         Authorization auth = new Authorization(idempotencyKey, requestHash, card == null ? null : card.getId(),
                 req.merchantId(), req.merchantName(), req.mcc(), req.amountMinor(), req.currency(), decision,
                 correlationId);

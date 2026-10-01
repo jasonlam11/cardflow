@@ -33,3 +33,8 @@ management:
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+
+logging:
+  pattern:
+    # Spring Boot adds this to every log line; filled from the MDC by CorrelationIdFilter
+    correlation: "[%X{correlationId:-}] "

@@ -49,3 +49,8 @@ cardflow:
     poll-interval-ms: 500
     batch-size: 100
     send-timeout-ms: 10000
+
+logging:
+  pattern:
+    # Spring Boot adds this to every log line; filled from the MDC by CorrelationIdFilter
+    correlation: "[%X{correlationId:-}] "
