@@ -10,10 +10,10 @@
 - Installed Docker Desktop
 - Verified locally: `make up` → postgres + kafka healthy; Kafka produce/consume round trip OK; PostgreSQL 18.6
 - CI green on PR #1 (stack boots healthy in 27s)
+- Per-service databases and roles (init script, written together). Verified 3×3 access matrix: each role connects only to its own DB; pgvector 0.8.6 enabled in `assistant`
 
 ### Next
-- [ ] **YOUR TURN:** implement `infra/postgres/init/01-create-databases.sh`
-- [ ] Merge PR #1 after the init script is reviewed
+- [ ] Merge PR #1
 - [ ] Install Java 25 LTS before Phase 1
 
 ### Open issues
