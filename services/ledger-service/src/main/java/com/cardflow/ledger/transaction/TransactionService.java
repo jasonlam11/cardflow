@@ -44,7 +44,9 @@ public class TransactionService {
         for (EntryRequest e : request.entries()) {
             txn.addEntry(e.accountId(), e.direction(), e.amountMinor(), request.currency());
         }
-        return transactions.save(txn);
+        // Flush now: callers may run plain JDBC next (e.g. the event consumer), which can't
+        // see inserts Hibernate is still holding in memory
+        return transactions.saveAndFlush(txn);
     }
 
     @Transactional(readOnly = true)

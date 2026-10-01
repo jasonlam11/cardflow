@@ -39,6 +39,10 @@ public class Account implements Persistable<UUID> {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    /** Link to another service's entity, e.g. "card:&lt;uuid&gt;"; null for manually created accounts. */
+    @Column(name = "external_ref", length = 100, updatable = false)
+    private String externalRef;
+
     /** Required by JPA; not for application use. */
     protected Account() {
     }
@@ -88,5 +92,9 @@ public class Account implements Persistable<UUID> {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public String getExternalRef() {
+        return externalRef;
     }
 }
