@@ -8,10 +8,12 @@
 - Created repo `jasonlam11/cardflow` (private) with PLAN.md
 - Phase 0 branch `phase-0-setup`: folder skeleton, Postgres 18 + pgvector, Kafka 4.3.1 (KRaft), Makefile, CI workflow, Dependabot, PR template, README diagram, ADRs 0001–0002
 - Installed Docker Desktop
+- Verified locally: `make up` → postgres + kafka healthy; Kafka produce/consume round trip OK; PostgreSQL 18.6
+- CI green on PR #1 (stack boots healthy in 27s)
 
 ### Next
 - [ ] **YOUR TURN:** implement `infra/postgres/init/01-create-databases.sh`
-- [ ] Verify `make up` locally and CI green on the Phase 0 PR, then merge
+- [ ] Merge PR #1 after the init script is reviewed
 - [ ] Install Java 25 LTS before Phase 1
 
 ### Open issues
