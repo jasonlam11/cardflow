@@ -14,6 +14,7 @@ import jakarta.persistence.PostLoad;
 import jakarta.persistence.PostPersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
+import com.cardflow.ledger.common.DbTime;
 
 /**
  * A ledger account. There is deliberately no balance field: balances are
@@ -52,7 +53,7 @@ public class Account implements Persistable<UUID> {
         this.name = name;
         this.type = type;
         this.currency = currency;
-        this.createdAt = Instant.now();
+        this.createdAt = DbTime.now();
     }
 
     /**

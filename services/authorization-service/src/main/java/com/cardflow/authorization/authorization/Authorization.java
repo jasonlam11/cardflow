@@ -14,6 +14,7 @@ import jakarta.persistence.PostLoad;
 import jakarta.persistence.PostPersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
+import com.cardflow.authorization.common.DbTime;
 
 /** The recorded outcome of one charge request. Immutable once written. */
 @Entity
@@ -82,7 +83,7 @@ public class Authorization implements Persistable<UUID> {
         this.status = decision.status();
         this.declineReason = decision.reason();
         this.correlationId = correlationId;
-        this.createdAt = Instant.now();
+        this.createdAt = DbTime.now();
     }
 
     @Override

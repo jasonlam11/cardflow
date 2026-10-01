@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -20,6 +21,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.kafka.autoconfigure.KafkaConnectionDetails;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
@@ -34,8 +37,17 @@ import com.jayway.jsonpath.JsonPath;
 
 /** Real Postgres + real Kafka. The scheduler is off so each test drives the relay itself. */
 @SpringBootTest(properties = {"cardflow.outbox.enabled=false", "cardflow.outbox.topic=relay-test"})
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, OutboxRelayTest.Topics.class})
 class OutboxRelayTest {
+
+    /** Create the topic at startup so the first send doesn't race topic auto-creation. */
+    @TestConfiguration
+    static class Topics {
+        @Bean
+        NewTopic relayTestTopic() {
+            return new NewTopic("relay-test", 1, (short) 1);
+        }
+    }
 
     @Autowired
     OutboxRelay relay;

@@ -16,6 +16,7 @@ import jakarta.persistence.PostLoad;
 import jakarta.persistence.PostPersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
+import com.cardflow.authorization.common.DbTime;
 
 /**
  * A synthetic credit card account. There is no card number anywhere: just a
@@ -64,7 +65,7 @@ public class CardAccount implements Persistable<UUID> {
         this.status = CardStatus.ACTIVE;
         this.creditLimitMinor = creditLimitMinor;
         this.currency = currency;
-        this.createdAt = Instant.now();
+        this.createdAt = DbTime.now();
     }
 
     public void changeStatus(CardStatus newStatus) {
