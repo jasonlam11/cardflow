@@ -13,8 +13,9 @@
 - Per-service databases and roles (init script, written together). Verified 3×3 access matrix: each role connects only to its own DB; pgvector 0.8.6 enabled in `assistant`
 
 ### Next
-- [ ] Merge PR #1
-- [ ] Install Java 25 LTS before Phase 1
+- [x] PR #1 merged (Phase 0 complete)
+- [ ] Phase 1 plan: ledger service
+- [x] Java 25.0.4.1 LTS installed (Homebrew, native arm64) and set as default in ~/.zprofile
 
 ### Open issues
 - None yet
