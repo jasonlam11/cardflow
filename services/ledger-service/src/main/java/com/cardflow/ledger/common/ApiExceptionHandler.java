@@ -5,6 +5,7 @@ import java.util.TreeMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -15,6 +16,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
+
+import com.cardflow.ledger.transaction.InvalidPostingException;
 
 /**
  * Turns exceptions into RFC 9457 Problem Details JSON responses.
@@ -28,6 +31,18 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(NotFoundException.class)
     ProblemDetail handleNotFound(NotFoundException ex) {
         return problem(HttpStatus.NOT_FOUND, "Not found", ex.getMessage());
+    }
+
+    @ExceptionHandler(InvalidPostingException.class)
+    ProblemDetail handleInvalidPosting(InvalidPostingException ex) {
+        return problem(HttpStatus.BAD_REQUEST, "Invalid posting", ex.getMessage());
+    }
+
+    /** A database constraint caught something the Java validation missed. Details stay in the logs. */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    ProblemDetail handleIntegrityViolation(DataIntegrityViolationException ex) {
+        log.warn("Database constraint violation", ex);
+        return problem(HttpStatus.CONFLICT, "Constraint violation", "The request violates a ledger constraint");
     }
 
     @ExceptionHandler(Exception.class)
