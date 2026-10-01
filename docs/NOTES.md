@@ -409,7 +409,8 @@ simulator ── POST /authorizations ──────────────
 3. **Consumers don't notice new topics quickly.** Subscribing before a topic exists can mean waiting minutes for a metadata refresh. Fix: create topics up front (`kafka-init` in Compose, `NewTopic` beans in tests).
 4. **`@Validated` on a controller changes the exception type.** It switched header validation to the AOP path, which threw an unmapped exception (a 500). Removing it uses Spring MVC's built-in validation, which returns a 400.
 5. **Postgres `jsonb` reformats JSON** (adds spaces, reorders keys), so tests must parse it, not string-match.
-6. **Unused test dependencies cost real time.** `spring-boot-starter-kafka-test` pulled in an embedded Kafka broker plus a 60 MB native library that timed out inside Docker. We use Testcontainers, so it was removed.
+6. **Clock precision differs by OS.** Linux `Instant.now()` has nanoseconds; Postgres stores microseconds. The first response used the in-memory value and the idempotent replay used the stored one, so they differed in the last 3 digits. It passed on macOS, whose clock only reports microseconds, and failed in Linux CI. Fix: `DbTime.now()` truncates every timestamp to microseconds when it's created. Lesson: make values match what the database will store *before* you return them.
+7. **Unused test dependencies cost real time.** `spring-boot-starter-kafka-test` pulled in an embedded Kafka broker plus a 60 MB native library that timed out inside Docker. We use Testcontainers, so it was removed.
 
 ### Known limitations (deliberately out of scope)
 - Idempotency keys and `processed_events` are kept forever; production would expire them.
