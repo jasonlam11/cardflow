@@ -13,8 +13,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import org.springframework.validation.method.ParameterErrors;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
+
+import com.cardflow.authorization.authorization.IdempotencyConflictException;
 
 /**
  * Turns exceptions into RFC 9457 Problem Details JSON responses.
@@ -30,6 +34,11 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         return problem(HttpStatus.NOT_FOUND, "Not found", ex.getMessage());
     }
 
+    @ExceptionHandler(IdempotencyConflictException.class)
+    ProblemDetail handleIdempotencyConflict(IdempotencyConflictException ex) {
+        return problem(HttpStatus.UNPROCESSABLE_CONTENT, "Idempotency key reused", ex.getMessage());
+    }
+
     @ExceptionHandler(Exception.class)
     ProblemDetail handleUnexpected(Exception ex) {
         log.error("Unhandled exception", ex);
@@ -43,6 +52,27 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         Map<String, String> errors = new TreeMap<>();
         ex.getBindingResult().getFieldErrors()
                 .forEach(e -> errors.putIfAbsent(e.getField(), e.getDefaultMessage()));
+        ProblemDetail body = problem(HttpStatus.BAD_REQUEST, "Validation failed", "Request has invalid fields");
+        body.setProperty("errors", errors);
+        return ResponseEntity.badRequest().body(body);
+    }
+
+    /**
+     * Raised instead of the above when a method validates more than the body
+     * (e.g. the Idempotency-Key header plus the body). Same response shape.
+     */
+    @Override
+    protected ResponseEntity<Object> handleHandlerMethodValidationException(HandlerMethodValidationException ex,
+            HttpHeaders headers, HttpStatusCode status, WebRequest request) {
+        Map<String, String> errors = new TreeMap<>();
+        ex.getParameterValidationResults().forEach(result -> {
+            if (result instanceof ParameterErrors bodyErrors) {
+                bodyErrors.getFieldErrors().forEach(e -> errors.putIfAbsent(e.getField(), e.getDefaultMessage()));
+            } else {
+                String name = result.getMethodParameter().getParameterName();
+                result.getResolvableErrors().forEach(e -> errors.putIfAbsent(name, e.getDefaultMessage()));
+            }
+        });
         ProblemDetail body = problem(HttpStatus.BAD_REQUEST, "Validation failed", "Request has invalid fields");
         body.setProperty("errors", errors);
         return ResponseEntity.badRequest().body(body);
