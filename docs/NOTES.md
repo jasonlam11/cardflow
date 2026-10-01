@@ -17,6 +17,7 @@ A running guide to how CardFlow is built and **why**. It's updated as each phase
 5. [Decision log](#5-decision-log)
 6. [Concepts glossary](#6-concepts-glossary)
 7. [Common commands & troubleshooting](#7-common-commands--troubleshooting)
+8. [ledger-service (Phase 1)](#8-ledger-service-phase-1)
 
 ---
 
@@ -142,7 +143,7 @@ Other details:
 
 It runs with `permissions: contents: read`, the least privilege a CI job can have. `concurrency` cancels outdated runs when you push again quickly.
 
-Phase 1 adds a job that builds and tests ledger-service.
+`.github/workflows/ledger-service.yml` (Phase 1) sets up Java 25 and runs `./mvnw verify`, which compiles the service and runs all unit and Testcontainers tests. It only runs when files under `services/ledger-service/` change (a **path filter**), so a docs-only PR doesn't wait for a Java build.
 
 **Dependabot** opens weekly PRs when a GitHub Action or Docker image has a newer version. We review and merge those PRs ourselves; nothing updates on its own.
 
@@ -164,6 +165,17 @@ Short version of every decision, newest at the bottom. The big ones also get a f
 | 8 | Bind ports to localhost only | Don't expose the DB or Kafka on your network | Docker default (0.0.0.0) | – |
 | 9 | Merge commits (not squash) for phase PRs | Keeps the small commits visible in history | Squash merge | – |
 | 10 | Java 25 LTS, native arm64 (Homebrew) | Latest LTS per PLAN.md; native build is faster than the Rosetta-translated JDK 21 | Java 21 LTS | – |
+| 11 | Double-entry with balances derived, never stored | Balances can't drift; every number can be audited from history | A `balance` column updated on each posting | [0003](adr/0003-double-entry-ledger.md) |
+| 12 | Enforce ledger rules in Postgres too (triggers), not just Java | Defense in depth: a bug or a manual SQL session still can't corrupt the ledger | Java-only validation | [0003](adr/0003-double-entry-ledger.md) |
+| 13 | Append-only history; fix mistakes with offsetting transactions | That's how real ledgers keep an audit trail | Allow UPDATE/DELETE | [0003](adr/0003-double-entry-ledger.md) |
+| 14 | Database per service | Independent schemas and blast radius | Shared database | [0004](adr/0004-database-per-service.md) |
+| 15 | Spring Boot 4.1.1 + Java 25, Maven wrapper | Latest stable; the wrapper pins the Maven version for everyone | Gradle | – |
+| 16 | Group code by feature (`account/`, `transaction/`) | Related code lives together | By layer (`controllers/`, `services/`) | – |
+| 17 | UUIDs generated in Java, entities implement `Persistable` | The ID is known before insert; `Persistable` avoids a wasted SELECT and a merge bug | Database-generated IDs | – |
+| 18 | No Lombok | No hidden generated code while learning; records cover most of it | Lombok | – |
+| 19 | RFC 9457 Problem Details for errors | Standard, machine-readable, no stack traces | Custom error JSON | – |
+| 20 | Account history returns this account's lines, not whole transactions | That's what a statement shows; avoids paginating over a join fetch | Return full transactions | – |
+| 21 | Multi-stage Docker image, JRE runtime, non-root | Smaller attack surface; no build tools in production | Single-stage JDK image running as root | – |
 
 ---
 
@@ -187,6 +199,25 @@ Plain-English definitions, added as each concept shows up.
 | **CI** | Automated checks that run on every change | GitHub Actions |
 | **ADR** | Architecture Decision Record: a short "we chose X because Y" doc | `docs/adr/` |
 | **Heredoc** | Bash syntax (`<<EOSQL ... EOSQL`) that feeds a block of text into a command | Init script |
+| **Double-entry** | Every transaction has equal debits and credits across at least two accounts | ledger-service |
+| **Debit / credit** | The two sides of an entry. Not "plus/minus": which one increases a balance depends on the account type | ledger-service |
+| **Normal side** | The side (debit or credit) that increases an account type's balance | `BalanceCalculator` |
+| **Minor units** | The smallest currency unit (cents), stored as an integer | All amounts |
+| **Spring Boot** | Framework that sets up a Java web app from sensible defaults | Java services |
+| **Dependency injection (DI)** | Spring creates objects and passes them into constructors, instead of classes creating their own dependencies | Every controller/service |
+| **Bean** | An object Spring creates and manages (`@Service`, `@Component`, `@RestController`) | Everywhere in Spring |
+| **JPA / Hibernate** | Maps Java classes (`@Entity`) to tables; Hibernate is the implementation | Entities |
+| **Repository** | Interface that Spring Data turns into database queries automatically | `AccountRepository` etc. |
+| **@Transactional** | Runs a method in one database transaction: everything commits, or nothing does | `TransactionService.post` |
+| **Flyway** | Runs versioned SQL migrations (`V1__...sql`) in order, once each | `db/migration/` |
+| **Constraint trigger (deferred)** | A trigger that runs at COMMIT, so it can check rules spanning many rows | Balance check |
+| **Bean Validation** | Annotations like `@NotNull`, `@Positive` that check input automatically | DTOs |
+| **DTO** | Data Transfer Object: the shape of a request/response, kept separate from entities | `*Dtos.java` |
+| **Testcontainers** | Starts real services (Postgres) in Docker for tests, then throws them away | Integration tests |
+| **MockMvc** | Sends fake HTTP requests through the full Spring stack, without a real network | API tests |
+| **Mockito** | Creates fake objects for unit tests | `AccountServiceTest` |
+| **Problem Details (RFC 9457)** | Standard JSON format for API errors | `ApiExceptionHandler` |
+| **Multi-stage build** | A Dockerfile that builds in one image and ships only the result in another | Dockerfile |
 
 ---
 
@@ -212,3 +243,74 @@ docker exec -it cardflow-postgres psql -U ledger_svc -d ledger
 | Changed the init script but nothing happened | Init scripts only run on an empty volume | `make reset-db` |
 | `permission denied for database` | Working as intended: wrong service login for that DB | Use the matching `*_svc` user |
 | `java -version` still shows 21 | Terminal opened before `~/.zprofile` was updated | Open a new terminal or `source ~/.zprofile` |
+| Code change not visible in the running service | The Compose image wasn't rebuilt | `make build` |
+| Tests fail with "Could not find a valid Docker environment" | Testcontainers needs Docker running | Start Docker Desktop |
+| `ledger-service` unhealthy in Compose | Usually a DB login issue | `make logs s=ledger-service` and check `LEDGER_DB_PASSWORD` in `.env` |
+
+---
+
+## 8. ledger-service (Phase 1)
+
+### What it does
+It records money movements using **double-entry bookkeeping**, and calculates balances from those records. Later (Phase 2), it will receive "transaction authorized" events from Kafka and post them automatically.
+
+### Double-entry in one example
+Alice buys a $42.50 coffee. From the card issuer's point of view:
+
+| Account | Type | Debit | Credit | Meaning |
+|---|---|---|---|---|
+| Alice receivable | ASSET | 4250 | | Alice now owes us $42.50 |
+| Coffee Shop payable | LIABILITY | | 4250 | We now owe the shop $42.50 |
+
+Debits (4250) = credits (4250), so the transaction balances. If Alice later pays back $10:
+
+| Account | Type | Debit | Credit |
+|---|---|---|---|
+| Settlement cash | ASSET | 1000 | |
+| Alice receivable | ASSET | | 1000 |
+
+Alice's balance = debits − credits = 4250 − 1000 = **3250** (she still owes $32.50).
+
+**"Debit" doesn't mean "minus."** Whether a debit increases or decreases a balance depends on the account type's **normal side**:
+
+| Type | Increases with | Balance formula |
+|---|---|---|
+| ASSET, EXPENSE | Debits | debits − credits |
+| LIABILITY, REVENUE | Credits | credits − debits |
+
+That's all `BalanceCalculator` does.
+
+### How a POST /transactions request flows
+```
+HTTP JSON
+  → TransactionController        @Valid runs Bean Validation (fields present, amounts > 0, 2–100 entries)
+  → TransactionService.post      @Transactional: everything below commits together or not at all
+      → AccountRepository.findAllById   load every referenced account in ONE query
+      → PostingValidator                accounts exist? same currency? debits == credits? (clear errors)
+      → LedgerTransaction + entries     build entities
+      → repository.save                 INSERT transaction + entries
+  → COMMIT → Postgres deferred triggers re-check balance, entry count, currency (safety net)
+  → 201 Created + Location header + JSON body
+```
+If anything fails, `ApiExceptionHandler` turns it into a clean `application/problem+json` response: 400 for bad input, 404 for unknown IDs, 409 if a database constraint catches something, and 500 with a generic message for anything else. Details go to the logs, never to the client.
+
+### Why the rules live in the database too
+Java validation gives friendly errors, but it's only one path into the data. A future bug, another code path, or someone running SQL by hand could bypass it. The Postgres triggers in `V1__init.sql` make it **impossible to commit** an unbalanced, single-entry, mixed-currency, or edited transaction. `LedgerSchemaConstraintsTest` proves this with raw SQL that skips Java entirely.
+
+### Why balances are derived, not stored
+A stored `balance` column has to be updated on every posting. If any update is missed, doubled, or races with another, the balance is silently wrong and nothing can tell you why. Deriving it (`SUM` of entries) means the balance is *by definition* consistent with the history, and the API returns the debit and credit totals so anyone can check it. The tradeoff is a query on every read. That's fast with an index; at huge scale you'd add snapshots (ADR 0003).
+
+### Gotchas we hit (good interview stories)
+1. **plpgsql and `NEW`**: one trigger function was shared by two tables, and `NEW.transaction_id` failed on the table that doesn't have that column, even inside an unused `CASE` branch. Fixed with `IF/ELSE`.
+2. **Spring Data `save()` with app-assigned UUIDs**: Spring Data decides "new or existing?" by checking whether the ID is null. Ours never is, so it ran `merge` (SELECT then UPDATE) instead of INSERT, and failed on the new entries. Fixed by implementing `Persistable.isNew()`.
+3. **Spring Initializr's `4.1.1.RELEASE`**: the Maven artifact is just `4.1.1`.
+4. **Healthcheck without curl**: the JRE image has no curl or wget, and `/bin/sh` is dash, so the healthcheck uses `bash`'s built-in `/dev/tcp`.
+
+### Tests (40)
+| Kind | Class | What it proves |
+|---|---|---|
+| DB rules | `LedgerSchemaConstraintsTest` | Postgres rejects bad data even when Java is bypassed |
+| Unit | `PostingValidatorTest`, `BalanceCalculatorTest`, `AccountServiceTest` | Business rules, fast, no database |
+| API | `AccountApiTest`, `TransactionApiTest`, `AccountHistoryApiTest`, `BalanceApiTest` | Full HTTP → DB → HTTP behavior, validation, error format |
+
+Integration tests use **Testcontainers**: Docker starts a throwaway Postgres 18.6, Flyway migrates it, and the tests run against the real database. That catches problems that an in-memory fake database (like H2) would hide, such as our triggers.

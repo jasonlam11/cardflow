@@ -1,4 +1,4 @@
-# Ecosystems for maven, pip and npm get added here as each service is created.
+# Ecosystems for pip and npm get added here as each service is created.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -13,3 +13,12 @@ updates:
       interval: weekly
     commit-message:
       prefix: chore
+  - package-ecosystem: maven
+    directory: /services/ledger-service
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+    groups:
+      spring:
+        patterns: ["org.springframework*", "org.springdoc*"]

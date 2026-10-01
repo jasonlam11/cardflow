@@ -1,0 +1,54 @@
+name: ledger-service
+
+on:
+  pull_request:
+    paths:
+      - services/ledger-service/**
+      - .github/workflows/ledger-service.yml
+  push:
+    branches: [main]
+    paths:
+      - services/ledger-service/**
+      - .github/workflows/ledger-service.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ledger-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: services/ledger-service
+
+jobs:
+  build-and-test:
+    name: Build and test (unit + Testcontainers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+
+      # Docker is preinstalled on ubuntu-latest, so Testcontainers just works
+      - name: Build and run all tests
+        run: ./mvnw -B -ntp verify
+
+      - name: Test summary
+        if: always()
+        run: |
+          total=$(grep -h 'Tests run' target/surefire-reports/*.txt | awk '{s+=$3} END {print s}')
+          echo "### ledger-service: ${total:-0} tests" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ledger-surefire-reports
+          path: services/ledger-service/target/surefire-reports
