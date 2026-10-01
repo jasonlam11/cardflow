@@ -2,7 +2,7 @@
 
 A simplified card payments platform built as microservices. A synthetic merchant sends a charge, and the platform **authorizes** it, **scores it for fraud** with explainable reason codes, records it in a **double-entry ledger**, and routes borderline cases to a **human review queue**. An **AI assistant** answers spending and card-benefit questions with grounded, cited answers and guardrails.
 
-> **Status:** Phase 0, infrastructure. See [PLAN.md](PLAN.md) for the roadmap and [PROGRESS.md](PROGRESS.md) for what's done.
+> **Status:** Phase 0 complete. See [PLAN.md](PLAN.md) for the roadmap, [PROGRESS.md](PROGRESS.md) for status, and [docs/NOTES.md](docs/NOTES.md) for how everything works and why.
 > All data is synthetic. No real card numbers or personal data.
 
 ## Architecture
