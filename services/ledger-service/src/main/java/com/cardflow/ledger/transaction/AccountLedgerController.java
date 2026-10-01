@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.cardflow.ledger.account.Account;
 import com.cardflow.ledger.account.AccountService;
 import com.cardflow.ledger.common.PageResponse;
 
@@ -27,6 +28,16 @@ public class AccountLedgerController {
     public AccountLedgerController(AccountService accountService, LedgerEntryRepository entries) {
         this.accountService = accountService;
         this.entries = entries;
+    }
+
+    /** Derived from the entries every time; there is no stored balance to drift out of sync. */
+    @GetMapping("/balance")
+    @Transactional(readOnly = true)
+    public BalanceResponse balance(@PathVariable UUID accountId) {
+        Account account = accountService.get(accountId);
+        DirectionTotals totals = entries.totalsFor(accountId);
+        return new BalanceResponse(account.getId(), account.getType(), account.getCurrency(),
+                BalanceCalculator.calculate(account.getType(), totals), totals.debits(), totals.credits());
     }
 
     @GetMapping("/transactions")

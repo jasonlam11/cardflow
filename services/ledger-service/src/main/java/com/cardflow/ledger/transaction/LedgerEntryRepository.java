@@ -20,4 +20,15 @@ public interface LedgerEntryRepository extends JpaRepository<LedgerEntry, UUID> 
             """,
             countQuery = "SELECT COUNT(e) FROM LedgerEntry e WHERE e.accountId = :accountId")
     Page<AccountActivity> findActivity(@Param("accountId") UUID accountId, Pageable pageable);
+
+    @Query("""
+            SELECT new com.cardflow.ledger.transaction.DirectionTotals(
+                       COALESCE(SUM(CASE WHEN e.direction = com.cardflow.ledger.transaction.Direction.DEBIT
+                                         THEN e.amountMinor ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN e.direction = com.cardflow.ledger.transaction.Direction.CREDIT
+                                         THEN e.amountMinor ELSE 0 END), 0))
+              FROM LedgerEntry e
+             WHERE e.accountId = :accountId
+            """)
+    DirectionTotals totalsFor(@Param("accountId") UUID accountId);
 }
