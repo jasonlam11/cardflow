@@ -64,6 +64,29 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  ledger-service:
+    build: ./services/ledger-service
+    image: cardflow/ledger-service:local
+    container_name: cardflow-ledger
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_NAME: ledger
+      DB_USER: ledger_svc
+      DB_PASSWORD: ${LEDGER_DB_PASSWORD:?set in .env}
+    ports:
+      - "127.0.0.1:${LEDGER_PORT:-8081}:8081"
+    healthcheck:
+      # The JRE image has no curl/wget and /bin/sh is dash, so use bash's /dev/tcp
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8081 && printf 'GET /actuator/health HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   kafka-data:
