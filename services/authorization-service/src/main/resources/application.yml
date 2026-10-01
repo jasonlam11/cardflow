@@ -48,3 +48,4 @@ cardflow:
     topic: transactions.authorized
     poll-interval-ms: 500
     batch-size: 100
+    send-timeout-ms: 10000
