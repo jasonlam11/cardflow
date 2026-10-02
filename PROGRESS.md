@@ -64,6 +64,7 @@
   - Security CI: npm audit + pip-audit on PRs; Trivy image scan on main/weekly; baseline 0 known vulnerabilities
   - Alpine JRE images (611/619 → 469 MB)
   - `make demo` one-command populated stack; demo GIF; README rewrite; ADR index; ADR 0013 (observability); NOTES §13
+  - Fresh-clone stranger test: fixed a repeat-`make demo` idempotency-key collision and a flaky cold pip install
   - Freed 6.6 GB (Docker build cache) when disk hit 1.3 GB free
 
 ### Next
@@ -103,7 +104,8 @@
 | fraud-service stopped at 100 req/s | p95 6.4 ms, 0 errors (rules fallback) | 2026-10-02 |
 | Java image size | 611 / 619 MB → 469 MB (Alpine JRE) | 2026-10-02 |
 | Known vulnerabilities (npm audit, pip-audit, Trivy CRITICAL) | 0 | 2026-10-02 |
-| `make demo` populate time (built images) | 38 s: 437 approved, 64 fraud declines, 10 pending review | 2026-10-02 |
+| `make demo` populate time (built images) | 38 s: 1,348 charges, 20 awaiting review (replayed days: 437 approved, 64 fraud declines, 10 review) | 2026-10-02 |
+| Fresh clone → running demo (cold build) | ~8–10 min on M2 laptop; stranger test found and fixed 2 snags | 2026-10-02 |
 | Duplicate postings under retry/failure tests | **0** (1,000-charge sim with 44 retries: 926 approved = 926 posted; e2e Kafka outage: 0 lost) | 2026-10-01 |
 | Outbox publish lag | p50 284 ms, p95 531 ms (500 ms poll) | 2026-10-01 |
 | Fraud model, offline test (days 77–89) | PR-AUC **0.918**; review-or-decline 72.3% precision / 89.8% recall; auto-decline 87.1% precision; rules fallback 16.6% recall | 2026-10-02 |

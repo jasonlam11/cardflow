@@ -750,11 +750,14 @@ The fraud-service fix revisits a Phase 3 decision (#43). `--workers` had caused 
 - Still large: assistant 828 MB (the embedding model and ONNX runtime) and fraud 597 MB (numpy, xgboost). They're big because of what they need, not because of waste.
 
 ### One-command demo
-`make demo` = create `.env` → build and start everything → replay 5 days of synthetic traffic for 60 cards (after 6 warm-up days of history) with fraud episodes. About 40 s after the images are built, the review queue has real flagged items: 437 approved, 64 fraud declines and 10 pending review on the run we recorded. The README's GIF was captured from that state by `dashboard/scripts/demo-capture.mjs`.
+`make demo` = create `.env` → build and start everything → replay 5 days of synthetic traffic for 60 cards (after 6 warm-up days of history) with fraud episodes. About 40 s after the images are built, the dashboard shows 1,348 charges with 20 awaiting review. The summary it prints covers only the 5 replayed days: 437 approved, 64 fraud declines, 10 pending review. The data is deterministic (fixed seed), so every run gives the same numbers.
+
+**Stranger test** (fresh clone into an empty directory, empty Docker volumes, following the README literally): it found two snags, both fixed. (1) A temporary PyPI failure broke the cold assistant build; pip now retries. (2) A second `make demo` replayed nothing, because idempotency keys came from the dataset and collided with the previous run's keys. Keys are now unique per run, with a regression test. After the fixes: clone → populated dashboard in one command; the cold build is about 8–10 minutes. The README's GIF was captured from that state by `dashboard/scripts/demo-capture.mjs`.
 
 ### Gotchas we hit
 1. **My first backlog measurement was wrong.** It drained during startup, before the load started, so the number meant nothing. I threw it out and used the breakpoint run. Check that you're measuring what you think you are.
 2. **Zero errors can hide a degraded system.** At 400 req/s there were no errors, but only 34% of charges were scored by the model. The `scored_by` breakdown exposed it.
 3. **Cold start shows up in demos.** The first assistant question took 2.6 s (loading the embedding model). A warm-up at startup brought it to 336 ms. The same applied to fraud-service after restarts.
 4. **Node resolves modules from the script's location**, not your working directory. The capture script had to live inside `dashboard/` to find Playwright.
-5. **Version tags drift.** The k6 image and the GitHub Actions versions in my head were outdated. Look them up instead of trusting memory.
+5. **"Works on my machine" because of leftover state.** The demo bug only appeared on a second run; my machine always had the first run's data. And my first "fresh" test silently reused my volumes, because the compose file fixes the project name. Test on genuinely empty state.
+6. **Version tags drift.** The k6 image and the GitHub Actions versions in my head were outdated. Look them up instead of trusting memory.

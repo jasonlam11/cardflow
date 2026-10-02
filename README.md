@@ -17,7 +17,7 @@ git clone https://github.com/jasonlam11/cardflow.git && cd cardflow
 make demo
 ```
 
-`make demo` creates `.env` from [`.env.example`](.env.example), builds and starts all 7 services, fills them with ~60 cards of realistic synthetic traffic (fraud patterns included), and prints the URL. The first build takes several minutes; after that it starts in about a minute.
+`make demo` creates `.env` from [`.env.example`](.env.example), builds and starts all 7 services, fills them with ~60 cards of realistic synthetic traffic (fraud patterns included), and prints the URL. The first run builds 6 images (about 8–10 minutes on an M2 laptop); after that it's about a minute.
 
 Then open **http://127.0.0.1:3000**:
 - **Review queue:** charges the fraud model flagged, with the score and the top reasons. Approve or reject with a note.
