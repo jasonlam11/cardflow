@@ -1,6 +1,6 @@
 # Progress
 
-## Current phase: 2, Authorization service + events
+## Current phase: 3, Fraud service
 
 ### Session log
 
@@ -31,10 +31,18 @@
   - CI: authorization-service, simulator and e2e workflows
   - ADR 0005 (outbox), ADR 0006 (idempotency); NOTES §9
 
+- Phase 2 merged (PR #6) after two CI-only fixes: timestamp precision on Linux, and a race on the shared Maven build cache
+- **Phase 3** (branch `phase-3-fraud`):
+  - Simulator v2: cardholder profiles, legit noise, four injected fraud patterns; `dataset` and `replay` modes
+  - fraud-service (Python 3.14, FastAPI, XGBoost): shared `compute_features()`, time-split training, model card, TreeSHAP reason codes, per-card history in its own Postgres DB
+  - authorization-service: fraud scored before the transaction, Resilience4j circuit breaker + timeouts, conservative rules fallback, `PENDING_REVIEW` (holds credit, no ledger event), `FRAUD_SUSPECTED` declines
+  - Found and fixed a ~40 ms per-call stall (uvicorn `--workers` + Nagle/delayed ACK)
+  - ADR 0007 (circuit breaker), ADR 0008 (shared features); NOTES §10
+
 ### Next
-- [ ] CI green on Phase 2 PR, then merge
-- [ ] Phase 2 explain-back questions (YOUR TURN)
-- [ ] Phase 3 plan: fraud-service (XGBoost + SHAP) and Resilience4j
+- [ ] CI green on Phase 3 PR, then merge
+- [ ] Explain-back questions for Phases 2 and 3 (YOUR TURN)
+- [ ] Phase 4 plan: dashboard + human review queue (approve/reject PENDING_REVIEW)
 - [x] PR #1 merged (Phase 0 complete)
 - [x] Java 25.0.4.1 LTS installed (Homebrew, native arm64) and set as default in ~/.zprofile
 
@@ -43,18 +51,23 @@
 - Balance reads SUM all entries; add snapshots if volume ever requires it (ADR 0003)
 - Idempotency keys, processed_events and published outbox rows are never cleaned up (ADR 0005/0006)
 - Simulator's `make simulate` rebuilds images on first run, which can take a while
+- Fraud model weakest on amount spikes (46% offline, 23% live recall)
+- fraud-service `card_activity` never pruned; fallback rules duplicated in Java and Python
+- fraud-service image is 596 MB (numpy + xgboost); slim down in Phase 6
 
 ## Metrics (real, measured numbers only)
 
 | Metric | Value | Measured |
 |---|---|---|
-| Services | 2 (ledger, authorization) + simulator | 2026-10-01 |
-| Total tests | 88: ledger 46, authorization 32, simulator 8, e2e 2 | 2026-10-01 |
-| p95 authorization latency | – | |
+| Services | 3 (ledger, authorization, fraud) + simulator | 2026-10-02 |
+| Total tests | 136: ledger 46, authorization 44, fraud 27, simulator 16, e2e 4 | 2026-10-02 |
+| p95 authorization latency | – (single requests ~15 ms incl. fraud call ~5 ms; proper load test in Phase 6) | 2026-10-02 |
 | Throughput (req/s) | – (50/s simulated without errors; real load test in Phase 6) | |
 | Duplicate postings under retry/failure tests | **0** (1,000-charge sim with 44 retries: 926 approved = 926 posted; e2e Kafka outage: 0 lost) | 2026-10-01 |
 | Outbox publish lag | p50 284 ms, p95 531 ms (500 ms poll) | 2026-10-01 |
-| Fraud model precision / recall / PR-AUC | – | |
+| Fraud model, offline test (days 77–89) | PR-AUC **0.918**; review-or-decline 72.3% precision / 89.8% recall; auto-decline 87.1% precision; rules fallback 16.6% recall | 2026-10-02 |
+| Fraud model, live replay through the stack | 20,041 authorizations in 108.5 s; flagged 69.9% precision / 86.3% recall; auto-decline 87.3% precision; 0.15% of legit charges declined | 2026-10-02 |
+| Fraud scoring latency | in-process p50 0.39 ms / p95 0.46 ms; HTTP call from authorization ~5 ms (was ~47 ms before the Nagle fix) | 2026-10-02 |
 | Assistant accuracy / refusal / citation / injection blocked | – | |
 | Deploy time push → live | – | |
 | Monthly AWS cost | – | |

@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 COMPOSE := docker compose
 
-.PHONY: help env up build down ps logs reset-db test-ledger test-auth test-sim simulate e2e
+.PHONY: help env up build down ps logs reset-db test-ledger test-auth test-sim test-fraud train simulate e2e
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -23,6 +23,14 @@ test-auth: ## Run authorization-service unit + integration tests (needs Docker)
 
 test-sim: ## Run simulator unit tests
 	cd simulator && python3 -m venv .venv && .venv/bin/pip install -q -r requirements-dev.txt && .venv/bin/pytest -q
+
+test-fraud: ## Run fraud-service tests (incl. model quality gate)
+	cd simulator && python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt && .venv/bin/python -m cardflow_sim dataset --out data/transactions.csv.gz
+	cd services/fraud-service && python3 -m venv .venv && .venv/bin/pip install -q -r requirements-dev.txt && FRAUD_TRAINING_DATA=$(CURDIR)/simulator/data/transactions.csv.gz .venv/bin/pytest -q
+
+train: ## Regenerate the synthetic dataset, retrain the fraud model, rewrite the model card
+	cd simulator && python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt && .venv/bin/python -m cardflow_sim dataset --out data/transactions.csv.gz
+	cd services/fraud-service && python3 -m venv .venv && .venv/bin/pip install -q -r requirements-train.txt && .venv/bin/python -m training.train
 
 simulate: ## Send synthetic traffic (make simulate ARGS="--cards 20 --charges 500 --rate 20")
 	$(COMPOSE) --profile sim run --rm --build simulator $(ARGS)
