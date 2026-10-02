@@ -9,6 +9,7 @@
 #   ledger_svc         ledger           LEDGER_DB_PASSWORD
 #   authorization_svc  authorization    AUTHORIZATION_DB_PASSWORD
 #   assistant_svc      assistant        ASSISTANT_DB_PASSWORD
+#   fraud_svc          fraud            FRAUD_DB_PASSWORD      (Phase 3)
 #
 # Note: passwords are interpolated into SQL, so they must not contain a
 # single quote. Fine for local dev; AWS uses SSM-managed values (Phase 7).
@@ -43,4 +44,12 @@ EOSQL
 # installs pgvector inside "assistant" rather than granting that to assistant_svc
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname assistant <<EOSQL
   CREATE EXTENSION IF NOT EXISTS vector;
+EOSQL
+
+# --- fraud-service (Phase 3) ---------------------------------------------
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<EOSQL
+  CREATE ROLE fraud_svc LOGIN PASSWORD '${FRAUD_DB_PASSWORD}';
+  CREATE DATABASE fraud OWNER fraud_svc;
+  REVOKE CONNECT ON DATABASE fraud FROM PUBLIC;
+  GRANT CONNECT ON DATABASE fraud TO fraud_svc;
 EOSQL

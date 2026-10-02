@@ -12,6 +12,7 @@ services:
       LEDGER_DB_PASSWORD: ${LEDGER_DB_PASSWORD:?set in .env}
       AUTHORIZATION_DB_PASSWORD: ${AUTHORIZATION_DB_PASSWORD:?set in .env}
       ASSISTANT_DB_PASSWORD: ${ASSISTANT_DB_PASSWORD:?set in .env}
+      FRAUD_DB_PASSWORD: ${FRAUD_DB_PASSWORD:?set in .env}
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -82,6 +83,22 @@ services:
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --list
     restart: "no"
 
+  fraud-service:
+    build: ./services/fraud-service
+    image: cardflow/fraud-service:local
+    container_name: cardflow-fraud
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_NAME: fraud
+      DB_USER: fraud_svc
+      DB_PASSWORD: ${FRAUD_DB_PASSWORD:?set in .env}
+    ports:
+      - "127.0.0.1:${FRAUD_PORT:-8083}:8083"
+    restart: unless-stopped
+
   authorization-service:
     build: ./services/authorization-service
     image: cardflow/authorization-service:local
@@ -97,6 +114,9 @@ services:
       DB_USER: authorization_svc
       DB_PASSWORD: ${AUTHORIZATION_DB_PASSWORD:?set in .env}
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      # No depends_on for fraud-service on purpose: authorization keeps working
+      # (rules fallback) when fraud-service is down or still starting
+      FRAUD_URL: http://fraud-service:8083
     ports:
       - "127.0.0.1:${AUTHORIZATION_PORT:-8082}:8082"
     healthcheck:

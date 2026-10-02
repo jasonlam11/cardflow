@@ -33,7 +33,9 @@ jobs:
         with:
           python-version: "3.14"
           cache: pip
-          cache-dependency-path: tests/e2e/requirements.txt
+          cache-dependency-path: |
+            tests/e2e/requirements.txt
+            simulator/requirements.txt
 
       - name: Create .env from example
         run: cp .env.example .env
@@ -49,6 +51,15 @@ jobs:
 
       - name: Simulator smoke run (200 charges)
         run: docker compose --profile sim run --rm --build simulator --cards 10 --charges 200 --rate 50
+
+      # Held-out synthetic days through the live stack (fraud model in the loop). Small, so this
+      # only proves the path works without errors; full metrics are recorded in PROGRESS.md.
+      - name: Replay smoke run (fraud scoring end to end)
+        working-directory: simulator
+        run: |
+          pip install -r requirements.txt
+          python -m cardflow_sim dataset --out data/transactions.csv.gz
+          python -m cardflow_sim replay --file data/transactions.csv.gz --max-cards 40 --warmup-days 3
 
       - name: Dump logs on failure
         if: failure()

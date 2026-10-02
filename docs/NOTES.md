@@ -19,6 +19,7 @@ A running guide to how CardFlow is built and **why**. It's updated as each phase
 7. [Common commands & troubleshooting](#7-common-commands--troubleshooting)
 8. [ledger-service (Phase 1)](#8-ledger-service-phase-1)
 9. [Authorization and events (Phase 2)](#9-authorization-and-events-phase-2)
+10. [Fraud scoring (Phase 3)](#10-fraud-scoring-phase-3)
 
 ---
 
@@ -187,6 +188,19 @@ Short version of every decision, newest at the bottom. The big ones also get a f
 | 29 | Dead-letter topic after 3 retries; poison messages skip retries | One bad event never blocks a partition, and nothing is silently dropped | Retry forever; log and skip | – |
 | 30 | Services share the JSON event contract, not Java classes | No compile-time coupling between services | A shared "events" library | – |
 | 31 | Correlation IDs via header → MDC → Kafka header | One ID traces a charge across both services' logs | No tracing until OpenTelemetry | – |
+| 32 | Circuit breaker + timeouts + rules fallback on the fraud call | A sick fraud-service can't take down payments, and fraud checks never switch off entirely | Fail open, fail closed, retries | [0007](adr/0007-circuit-breaker-fallback.md) |
+| 33 | Fallback never declines, only routes to review | Without history the rules can't tell fraud from a big legit purchase | Rules that decline | [0007](adr/0007-circuit-breaker-fallback.md) |
+| 34 | Score fraud before the DB transaction | Never hold the card row lock during a network call | Score inside the transaction | [0007](adr/0007-circuit-breaker-fallback.md) |
+| 35 | One `compute_features()` for training and serving | No training/serving skew | Separate SQL features; a feature store | [0008](adr/0008-shared-feature-code.md) |
+| 36 | Time-based train/validation/test split | Evaluation must match "train on the past, predict the future" | Random split (leaks) | [model card](model-card.md) |
+| 37 | PR-AUC, precision, recall (not accuracy) | 1.5% fraud: "always legit" is 98.5% accurate | Accuracy, ROC-AUC alone | [model card](model-card.md) |
+| 38 | Thresholds picked on validation: review at 90% recall, decline at 90% precision | Separates "a human looks" from "we're confident enough to decline" | One threshold | [model card](model-card.md) |
+| 39 | `PENDING_REVIEW` status that holds credit, no ledger event until approved | The model never has the final word on borderline cases | Approve and flag | – |
+| 40 | XGBoost JSON model format, not pickle | Loading a pickle can execute code | pickle / joblib | – |
+| 41 | XGBoost's built-in TreeSHAP at runtime; `shap` library only in training | Same exact values, far fewer runtime dependencies | `shap` in the API image | – |
+| 42 | Optional `occurredAt` on charges + replay mode | Realistic timing for features; lets us measure the model through the live system | Server time only | – |
+| 43 | fraud-service: one uvicorn process per container | Measured: `--workers` mode added a ~40 ms Nagle stall per request | Multiple workers per container | – |
+| 44 | `xgboost-cpu` in images and CI | ~6 MB instead of ~250 MB of GPU libraries we don't use | Full `xgboost` | – |
 
 ---
 
@@ -242,6 +256,19 @@ Plain-English definitions, added as each concept shows up.
 | **SKIP LOCKED** | Skip rows another transaction has locked instead of waiting | Outbox relay |
 | **MDC** | Mapped Diagnostic Context: per-thread values added to every log line | Correlation ID |
 | **Persistence context / flush** | Hibernate holds changes in memory and sends them to the DB at flush | The saveAndFlush bug |
+| **Feature** | A number computed from raw data that the model learns from, e.g. "charges in the last hour" | fraud-service |
+| **Training/serving skew** | Features computed differently in training vs production, so the model sees unfamiliar inputs | Avoided by shared code |
+| **Data leakage** | Information from the future (or the label) sneaking into training, inflating metrics | Avoided by time split |
+| **Class imbalance** | One class is rare (fraud ~1.5%) | `scale_pos_weight`, PR-AUC |
+| **Precision / recall** | Of what we flagged, how much was fraud / of all fraud, how much we flagged | Model card |
+| **PR-AUC** | Area under the precision-recall curve; random ≈ the fraud rate, perfect = 1 | Headline model metric |
+| **Gradient-boosted trees (XGBoost)** | Many small decision trees, each correcting the previous ones | The model |
+| **SHAP value** | How much one feature pushed one prediction up or down | Reason codes |
+| **Reason code** | Human-readable explanation of a score, e.g. `HIGH_VELOCITY` | API response, analyst UI |
+| **Circuit breaker** | Stops calling a failing dependency for a while so failures are instant, then probes recovery | Fraud call |
+| **Fallback** | What to do when the dependency can't answer | Rule-based scorer |
+| **Cascading failure** | One slow service making its callers slow, and so on up the chain | What the breaker prevents |
+| **Nagle's algorithm / delayed ACK** | TCP batching tricks that, combined, can add ~40 ms to small request/response exchanges | The fraud latency bug |
 
 ---
 
@@ -274,6 +301,9 @@ docker exec -it cardflow-postgres psql -U ledger_svc -d ledger
 | Ledger balances lag behind approvals | Kafka down, or the outbox relay is failing | `SELECT COUNT(*) FROM outbox_events WHERE published_at IS NULL` in the `authorization` DB; check `last_error` |
 | Image builds take forever | First Maven download inside Docker | Later builds reuse the `~/.m2` cache mount |
 | A charge was declined unexpectedly | Check `declineReason` | Common: `INSUFFICIENT_CREDIT` once a card's limit is used up |
+| fraud-service won't start: password authentication failed for `fraud_svc` | Your Postgres volume predates the `fraud` database | `make reset-db` (local data only) |
+| Every response has `"scoredBy": "RULES_FALLBACK"` | fraud-service down or the circuit is open | `make logs s=fraud-service`; the circuit retries after 10 s |
+| Retraining changed nothing | Training is deterministic for a given dataset and seed | Change the data/seed or parameters on purpose |
 
 ---
 
@@ -417,3 +447,81 @@ simulator ── POST /authorizations ──────────────
 - Published outbox rows aren't cleaned up.
 - No reversals, refunds or settlement yet: an authorization is treated as final.
 - Available credit sums all approvals; with millions per card you'd keep a running total updated under the same row lock.
+
+---
+
+## 10. Fraud scoring (Phase 3)
+
+### The flow, now with fraud
+```
+POST /authorizations
+  ├─ idempotency check (replay if seen)
+  ├─ unlocked card check ── unknown / inactive? → NOT_SCORED (skip fraud)
+  ├─ fraud score ───────────────▶ fraud-service POST /score   (timeouts 200/300 ms)
+  │      via circuit breaker          ├─ load card's last 30 days (≤100) from Postgres
+  │      └─ on failure: rules         ├─ compute_features(history, current)   ← same code as training
+  │                                   ├─ XGBoost score + TreeSHAP contributions
+  │                                   ├─ band: LOW / REVIEW / HIGH  (thresholds from metadata)
+  │                                   └─ record this charge in the card's history (once per requestId)
+  └─ ONE DB transaction: lock card → rules → save (status, score, band, reasons, scored_by)
+         HIGH   → DECLINED / FRAUD_SUSPECTED   (200)
+         REVIEW → PENDING_REVIEW, credit held, no ledger event yet  (202)
+         LOW    → normal rules → APPROVED (201) + outbox event
+```
+
+### How the model was built
+1. **Data:** simulator v2 generates 90 days for 1,500 synthetic cardholders (255,003 transactions, 1.47% fraud), with realistic legit "noise" so fraud isn't trivial.
+2. **Features:** 15, computed by replaying the data in time order with the same function the API uses.
+3. **Split by time:** train days 0–62, validation 63–76, test 77–89. Never random.
+4. **Train:** XGBoost, early stopping on validation PR-AUC, `scale_pos_weight` for imbalance. 101 trees; training is deterministic.
+5. **Thresholds** chosen on validation only; **metrics** measured once on test. See [model-card.md](model-card.md).
+
+| Test period (offline) | Precision | Recall |
+|---|---|---|
+| Flag for review or decline | 72.3% | 89.8% |
+| Auto-decline (HIGH) | 87.1% | 81.9% |
+| Rule-based fallback | 30.7% | 16.6% |
+
+PR-AUC **0.918** (random ≈ 0.013). Weakest pattern: amount spikes (46% recall).
+
+**Live replay (the real stack, end to end).** `python -m cardflow_sim replay` sent the held-out days through authorization → fraud-service → decision, with original timestamps: 400 cardholders, 14 warm-up days (not scored), then days 77–89 measured. **20,041 real authorizations in 108.5 s.**
+
+| Live, days 77–89 (9,614 charges, 124 fraud) | Result | Offline test |
+|---|---|---|
+| Flagged (review or decline): precision / recall | **69.9% / 86.3%** | 72.3% / 89.8% |
+| Auto-declined that were fraud | **87.3%** (96 of 110) | 87.1% |
+| Legitimate charges wrongly declined | **0.15%** (14 of 9,490) | – |
+| Recall by pattern | velocity 100%, unusual category 90%, impossible travel 76%, amount spike 23% | 98% / 87% / 80% / 46% |
+
+Live numbers track offline within a few points, which is the evidence there's no training/serving skew. The small gap is expected: each card only had 14 days of history in the replay versus up to 90 in training.
+
+### Proof (automated)
+| Claim | Test |
+|---|---|
+| Feature math (velocity windows, travel speed, first-time category, NaN handling, caps) | `fraud-service/tests/test_features.py` |
+| Training split never overlaps in time; model beats rules; quality gate | `test_training.py` (CI retrains from scratch) |
+| Burst and impossible travel get flagged with reasons | `test_api.py` |
+| HIGH declines, REVIEW holds credit without a ledger event | `FraudIntegrationTest` |
+| fraud-service error or slow → rules fallback within the timeout | `FraudIntegrationTest` |
+| Circuit opens after 10 failures; the next calls never reach fraud-service | `FraudIntegrationTest` |
+| Authorization keeps working with fraud-service stopped | e2e `test_authorizations_keep_working_when_fraud_service_is_down` |
+
+### Gotchas we hit
+1. **`PENDING_REVIEW` didn't fit `VARCHAR(10)`.** The column from Phase 2 was too short for the new status; the integration test caught the 500. Fixed in Flyway V2 (`ALTER COLUMN ... TYPE VARCHAR(16)`).
+2. **`REAL` is a 32-bit float.** A score of 0.02 came back as 0.0199999. Scores are `DOUBLE PRECISION`.
+3. **Boot 4 split out `RestClient.Builder`.** Used Spring Framework's `RestClient.builder()` instead of adding another starter.
+4. **A 40 ms stall on every fraud call** (the big one). Authorization took ~57 ms, fraud-service said it took ~2 ms. How it was found, step by step:
+   - Added timings to the authorization log: the fraud call was ~47 ms, the DB work ~5 ms.
+   - Fresh connections were fast; kept-alive ones always ~45 ms. A fixed ~40 ms on reuse is the signature of **Nagle's algorithm + TCP delayed ACK**.
+   - Tried client fixes (HTTP/1.1, a different HTTP client, `TCP_NODELAY` on the client): no change, so the client wasn't it.
+   - Probed with Python from another container: same 45 ms. Probed even `GET /model` (no DB, no body): same. So it was the server.
+   - Isolated in a throwaway container: one uvicorn worker 1.2 ms, `--workers 2` **42 ms**.
+   - Fix: one uvicorn process per container. Fraud call ~5 ms, authorization ~15 ms.
+   - Lesson: **measure each hop before changing things**, and change one variable at a time. Two plausible-sounding fixes did nothing.
+5. **A stopped container's hostname doesn't resolve**, so with fraud-service down each call spent ~200 ms on DNS before falling back. The circuit breaker is what makes this cheap: once open, calls skip the network entirely.
+
+### Known limitations
+- Synthetic data; real fraud is messier and adversarial. Monitoring for drift and retraining from analyst decisions and chargebacks would be next.
+- Cold start: new cards have no history-based signal.
+- fraud-service's `card_activity` grows forever; production would expire rows older than the 30-day window.
+- The fallback rules are duplicated in Java (serving) and Python (measurement); a shared spec or test fixture would keep them in sync.

@@ -37,3 +37,7 @@ crash.log
 # ML artifacts (large models are regenerated, not committed)
 *.pkl
 *.joblib
+
+# Generated datasets (regenerate with: python -m cardflow_sim dataset)
+data/
+*.csv.gz

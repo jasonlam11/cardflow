@@ -1,0 +1,111 @@
+{
+  "model_version": "fraud-xgb-5fce97ecbf",
+  "trained_at": "2026-10-02T02:45:07+00:00",
+  "features": [
+    "amount_log",
+    "amount_to_avg",
+    "txn_count_10m",
+    "txn_count_1h",
+    "txn_count_24h",
+    "amount_sum_1h_log",
+    "minutes_since_last_log",
+    "km_from_last_located",
+    "speed_kmh_from_last_located",
+    "km_from_usual_location",
+    "mcc_first_time",
+    "is_high_risk_mcc",
+    "is_ecommerce",
+    "hour_of_day",
+    "distinct_merchants_1h"
+  ],
+  "thresholds": {
+    "review": 0.876087,
+    "high": 0.942045
+  },
+  "threshold_policy": {
+    "review": "highest threshold with validation recall >= 0.9",
+    "high": "lowest threshold with validation precision >= 0.9"
+  },
+  "split": {
+    "train_days": "0-62",
+    "validation_days": "63-76",
+    "test_days": "77+",
+    "train_rows": 178447,
+    "validation_rows": 39908
+  },
+  "dataset": {
+    "path": "transactions.csv.gz",
+    "rows": 255003,
+    "fraud_rate": 0.0147
+  },
+  "params": {
+    "objective": "binary:logistic",
+    "eval_metric": "aucpr",
+    "max_depth": 5,
+    "eta": 0.08,
+    "subsample": 0.9,
+    "colsample_bytree": 0.9,
+    "min_child_weight": 3,
+    "tree_method": "hist",
+    "seed": 7,
+    "scale_pos_weight": 65.83408239700374
+  },
+  "trees": 101,
+  "metrics": {
+    "test_rows": 36648,
+    "test_fraud": 469,
+    "pr_auc": 0.9181,
+    "roc_auc": 0.9958,
+    "flagged_review_or_high": {
+      "precision": 0.7234,
+      "recall": 0.8977,
+      "flag_rate": 0.0159,
+      "true_positives": 421,
+      "false_positives": 161,
+      "false_negatives": 48
+    },
+    "auto_declined_high": {
+      "precision": 0.8707,
+      "recall": 0.8188,
+      "flag_rate": 0.012,
+      "true_positives": 384,
+      "false_positives": 57,
+      "false_negatives": 85
+    },
+    "rules_fallback": {
+      "precision": 0.3071,
+      "recall": 0.1663,
+      "flag_rate": 0.0069,
+      "true_positives": 78,
+      "false_positives": 176,
+      "false_negatives": 391
+    },
+    "recall_by_pattern": {
+      "amount_spike": {
+        "count": 46,
+        "model_recall": 0.4565,
+        "rules_recall": 0.1304
+      },
+      "impossible_travel": {
+        "count": 51,
+        "model_recall": 0.8039,
+        "rules_recall": 0.0784
+      },
+      "unusual_mcc": {
+        "count": 38,
+        "model_recall": 0.8684,
+        "rules_recall": 0.3947
+      },
+      "velocity_burst": {
+        "count": 334,
+        "model_recall": 0.976,
+        "rules_recall": 0.1587
+      }
+    },
+    "baseline_pr_auc_if_random": 0.0128,
+    "scoring_latency_ms": {
+      "p50": 0.38,
+      "p95": 0.45
+    }
+  }
+}

@@ -20,6 +20,14 @@ public final class RequestHasher {
         // Unit separator (U+001F) can't appear in validated fields, so values can't run together
         String canonical = String.join("\u001F", r.cardId().toString(), r.merchantId(), r.merchantName(), r.mcc(),
                 Long.toString(r.amountMinor()), r.currency());
+        // Phase 3 fields are appended only when present, so requests without them
+        // hash exactly as they did in Phase 2 (stored keys stay valid)
+        if (r.channel() != null || r.merchantLocation() != null || r.occurredAt() != null) {
+            var loc = r.merchantLocation();
+            canonical = String.join("\u001F", canonical, String.valueOf(r.channel()),
+                    loc == null ? "null" : loc.lat() + "," + loc.lon() + "," + loc.country(),
+                    String.valueOf(r.occurredAt()));
+        }
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(canonical.getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(digest);

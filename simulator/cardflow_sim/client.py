@@ -16,6 +16,7 @@ class AuthorizationClient:
         return r.json()["id"]
 
     def authorize(self, idempotency_key: str, body: dict, correlation_id: str | None = None) -> httpx.Response:
+        """POST /authorizations. Declines are normal responses, so no raise_for_status here."""
         headers = {"Idempotency-Key": idempotency_key}
         if correlation_id:
             headers["X-Correlation-Id"] = correlation_id

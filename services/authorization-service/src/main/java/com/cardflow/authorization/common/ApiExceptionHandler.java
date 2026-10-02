@@ -34,6 +34,11 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         return problem(HttpStatus.NOT_FOUND, "Not found", ex.getMessage());
     }
 
+    @ExceptionHandler(BadRequestException.class)
+    ProblemDetail handleBadRequest(BadRequestException ex) {
+        return problem(HttpStatus.BAD_REQUEST, "Invalid request", ex.getMessage());
+    }
+
     @ExceptionHandler(IdempotencyConflictException.class)
     ProblemDetail handleIdempotencyConflict(IdempotencyConflictException ex) {
         return problem(HttpStatus.UNPROCESSABLE_CONTENT, "Idempotency key reused", ex.getMessage());

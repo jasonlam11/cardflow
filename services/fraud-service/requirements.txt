@@ -1,0 +1,7 @@
+# Runtime (the API image)
+fastapi==0.142.2
+uvicorn==0.54.0
+xgboost==3.4.1
+numpy==2.5.3
+psycopg[binary]==3.3.6
+psycopg-pool==3.3.3

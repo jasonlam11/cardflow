@@ -16,6 +16,7 @@
 	<properties>
 		<java.version>25</java.version>
 		<springdoc.version>3.1.1</springdoc.version>
+		<resilience4j.version>2.4.0</resilience4j.version>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -47,6 +48,12 @@
 			<groupId>org.springdoc</groupId>
 			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
 			<version>${springdoc.version}</version>
+		</dependency>
+		<!-- Circuit breaker around the fraud-service call (core library, configured in code) -->
+		<dependency>
+			<groupId>io.github.resilience4j</groupId>
+			<artifactId>resilience4j-circuitbreaker</artifactId>
+			<version>${resilience4j.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>org.flywaydb</groupId>
@@ -127,6 +134,12 @@
 				<artifactId>maven-surefire-plugin</artifactId>
 				<configuration>
 					<argLine>-javaagent:${org.mockito:mockito-core:jar} -Xshare:off</argLine>
+					<systemPropertyVariables>
+						<!-- Tests must never reach a real fraud-service (e.g. one running in compose on 8083).
+						     Port 9 refuses connections instantly, so tests use the rules fallback unless
+						     they start their own fake fraud-service. -->
+						<cardflow.fraud.url>http://127.0.0.1:9</cardflow.fraud.url>
+					</systemPropertyVariables>
 				</configuration>
 			</plugin>
 		</plugins>

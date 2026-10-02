@@ -1,9 +1,19 @@
 package com.cardflow.authorization.authorization;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import org.springframework.data.domain.Persistable;
+
+import com.cardflow.authorization.authorization.AuthorizationDtos.AuthorizationRequest;
+import com.cardflow.authorization.common.DbTime;
+import com.cardflow.authorization.fraud.FraudAssessment;
+import com.cardflow.authorization.fraud.FraudAssessment.FraudReason;
+import com.cardflow.authorization.fraud.FraudBand;
+import com.cardflow.authorization.fraud.ScoredBy;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -14,8 +24,6 @@ import jakarta.persistence.PostLoad;
 import jakarta.persistence.PostPersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
-import com.cardflow.authorization.common.DbTime;
-
 /** The recorded outcome of one charge request. Immutable once written. */
 @Entity
 @Table(name = "authorizations")
@@ -49,7 +57,7 @@ public class Authorization implements Persistable<UUID> {
     private String currency;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 10, updatable = false)
+    @Column(nullable = false, length = 16, updatable = false)
     private AuthorizationStatus status;
 
     @Enumerated(EnumType.STRING)
@@ -62,10 +70,61 @@ public class Authorization implements Persistable<UUID> {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    @Column(length = 16, updatable = false)
+    private String channel;
+
+    @Column(name = "merchant_lat", updatable = false)
+    private Double merchantLat;
+
+    @Column(name = "merchant_lon", updatable = false)
+    private Double merchantLon;
+
+    @Column(name = "merchant_country", length = 2, updatable = false)
+    private String merchantCountry;
+
+    @Column(name = "occurred_at", updatable = false)
+    private Instant occurredAt;
+
+    @Column(name = "fraud_score", updatable = false)
+    private Double fraudScore;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "fraud_band", length = 8, updatable = false)
+    private FraudBand fraudBand;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "fraud_reasons", updatable = false)
+    private List<FraudReason> fraudReasons;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "scored_by", length = 16, updatable = false)
+    private ScoredBy scoredBy;
+
+    @Column(name = "model_version", length = 40, updatable = false)
+    private String modelVersion;
+
     @Transient
     private boolean isNew = true;
 
     protected Authorization() {
+    }
+
+    public Authorization(String idempotencyKey, String requestHash, UUID cardAccountId, AuthorizationRequest req,
+            Decision decision, FraudAssessment fraud, String correlationId) {
+        this(idempotencyKey, requestHash, cardAccountId, req.merchantId(), req.merchantName(), req.mcc(),
+                req.amountMinor(), req.currency(), decision, correlationId);
+        this.channel = req.channel() == null ? null : req.channel().name();
+        if (req.merchantLocation() != null) {
+            this.merchantLat = req.merchantLocation().lat();
+            this.merchantLon = req.merchantLocation().lon();
+            this.merchantCountry = req.merchantLocation().country();
+        }
+        this.occurredAt = DbTime.truncate(req.occurredAt());
+        this.fraudScore = fraud.score();
+        this.fraudBand = fraud.band();
+        this.fraudReasons = fraud.reasons();
+        this.scoredBy = fraud.scoredBy();
+        this.modelVersion = fraud.modelVersion();
     }
 
     public Authorization(String idempotencyKey, String requestHash, UUID cardAccountId, String merchantId,
@@ -148,5 +207,33 @@ public class Authorization implements Persistable<UUID> {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public String getChannel() {
+        return channel;
+    }
+
+    public Instant getOccurredAt() {
+        return occurredAt;
+    }
+
+    public Double getFraudScore() {
+        return fraudScore;
+    }
+
+    public FraudBand getFraudBand() {
+        return fraudBand;
+    }
+
+    public List<FraudReason> getFraudReasons() {
+        return fraudReasons;
+    }
+
+    public ScoredBy getScoredBy() {
+        return scoredBy;
+    }
+
+    public String getModelVersion() {
+        return modelVersion;
     }
 }

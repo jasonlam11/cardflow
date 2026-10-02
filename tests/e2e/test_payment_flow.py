@@ -1,6 +1,6 @@
 import random
 
-from conftest import auth_sql, charge, compose, create_card, ledger_sql, wait_until
+from conftest import auth_sql, charge, compose, create_card, ledger_sql, spaced_times, wait_until
 
 
 def ledger_postings_for(auth_ids: list[str]) -> dict[str, int]:
@@ -28,16 +28,16 @@ def test_charges_flow_to_ledger_exactly_once(auth):
     approved: dict[str, int] = {}
     retries = 0
 
-    for _ in range(40):
+    for when in spaced_times(40):
         amount = rng.randint(100, 9_000)
         key = f"e2e-{rng.getrandbits(64):x}"
-        r = charge(auth, card, amount, key)
-        assert r.status_code in (200, 201), r.text
+        r = charge(auth, card, amount, key, occurred_at=when)
+        assert r.status_code in (200, 201, 202), r.text
         if r.status_code == 201:
             approved[r.json()["id"]] = amount
         # Every 4th request is retried with the same key, like a client that timed out
         if rng.random() < 0.25:
-            again = charge(auth, card, amount, key)
+            again = charge(auth, card, amount, key, occurred_at=when)
             assert again.headers["Idempotent-Replayed"] == "true"
             assert again.json()["id"] == r.json()["id"]
             retries += 1
@@ -58,8 +58,8 @@ def test_kafka_outage_loses_no_transactions(auth):
     compose("stop", "kafka")
     try:
         ids = []
-        for i in range(10):
-            r = charge(auth, card, 1_000 + i)
+        for i, when in enumerate(spaced_times(10)):
+            r = charge(auth, card, 1_000 + i, occurred_at=when)
             assert r.status_code == 201, "authorization must keep working while Kafka is down"
             ids.append(r.json()["id"])
 
