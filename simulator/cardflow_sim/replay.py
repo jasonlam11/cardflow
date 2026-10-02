@@ -8,6 +8,7 @@ fraud-service; they're sent but not counted in the metrics.
 
 import csv
 import time
+import uuid
 
 import httpx
 from collections import Counter
@@ -52,6 +53,9 @@ def replay(client: AuthorizationClient, path: str, from_day: int, warmup_days: i
         keep_set = set(keep)
         rows = [r for r in rows if r["card_id"] in keep_set]
 
+    # Keys are unique per run (each run creates new cards), so replaying again against the same stack isn't
+    # rejected as key reuse. Retries inside a run keep their key, which is what makes them safe.
+    run_id = uuid.uuid4().hex[:8]
     card_ids: dict[str, str] = {}
     stats: Counter[str] = Counter()
     results = []
@@ -67,7 +71,7 @@ def replay(client: AuthorizationClient, path: str, from_day: int, warmup_days: i
         }
         if r["lat"]:
             body["merchantLocation"] = {"lat": float(r["lat"]), "lon": float(r["lon"]), "country": r["country"]}
-        resp = _authorize_with_retry(client, f"replay-{r['card_id'][:8]}-{i}", body)
+        resp = _authorize_with_retry(client, f"replay-{run_id}-{i}", body)
         result = outcome(resp)
 
         if datetime.fromisoformat(r["ts"]) >= measure_from:

@@ -104,7 +104,9 @@ def _demo(args) -> int:
     flagged = summary.get("PENDING_REVIEW", 0) + summary.get("FRAUD_SUSPECTED", 0)
     print(f"done: {summary.get('APPROVED', 0)} approved, {summary.get('FRAUD_SUSPECTED', 0)} declined as fraud, "
           f"{summary.get('PENDING_REVIEW', 0)} waiting for review ({flagged} flagged in total)", flush=True)
-    return 0
+    if summary.get("ERROR"):
+        print(f"warning: {summary['ERROR']} requests failed; check `make logs s=authorization-service`", flush=True)
+    return 0 if summary.get("APPROVED") else 1
 
 
 def _live(args) -> int:

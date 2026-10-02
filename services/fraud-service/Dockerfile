@@ -4,7 +4,7 @@ WORKDIR /app
 COPY requirements.txt .
 # xgboost-cpu: same package without the GPU/CUDA libraries (~6 MB instead of ~250 MB with dependencies)
 RUN sed 's/^xgboost==/xgboost-cpu==/' requirements.txt > requirements-image.txt \
-    && pip install --no-cache-dir -r requirements-image.txt
+    && pip install --no-cache-dir --retries 10 --timeout 60 -r requirements-image.txt
 
 COPY fraud fraud
 COPY model model
