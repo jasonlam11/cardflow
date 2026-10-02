@@ -64,6 +64,49 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  # One-shot: creates topics explicitly (auto-creation is disabled), then exits
+  kafka-init:
+    image: apache/kafka:4.3.1
+    container_name: cardflow-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        for t in transactions.authorized transactions.authorized.DLT; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists \
+            --topic "$$t" --partitions 3 --replication-factor 1
+        done
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --list
+    restart: "no"
+
+  authorization-service:
+    build: ./services/authorization-service
+    image: cardflow/authorization-service:local
+    container_name: cardflow-authorization
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      DB_HOST: postgres
+      DB_NAME: authorization
+      DB_USER: authorization_svc
+      DB_PASSWORD: ${AUTHORIZATION_DB_PASSWORD:?set in .env}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    ports:
+      - "127.0.0.1:${AUTHORIZATION_PORT:-8082}:8082"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8082 && printf 'GET /actuator/health HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
   ledger-service:
     build: ./services/ledger-service
     image: cardflow/ledger-service:local
@@ -71,11 +114,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     environment:
       DB_HOST: postgres
       DB_NAME: ledger
       DB_USER: ledger_svc
       DB_PASSWORD: ${LEDGER_DB_PASSWORD:?set in .env}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
     ports:
       - "127.0.0.1:${LEDGER_PORT:-8081}:8081"
     healthcheck:
@@ -86,6 +132,18 @@ services:
       retries: 12
       start_period: 30s
     restart: unless-stopped
+
+  # Not started by `make up`; run with `make simulate`
+  simulator:
+    build: ./simulator
+    image: cardflow/simulator:local
+    profiles: ["sim"]
+    depends_on:
+      authorization-service:
+        condition: service_healthy
+    environment:
+      AUTHORIZATION_URL: http://authorization-service:8082
+    restart: "no"
 
 volumes:
   postgres-data:

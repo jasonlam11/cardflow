@@ -12,6 +12,15 @@ spring:
     open-in-view: false
   flyway:
     locations: classpath:db/migration
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: ledger-service
+      # A brand-new consumer group starts from the oldest retained event, not "now"
+      auto-offset-reset: earliest
+    producer:
+      # Used only to publish failed events to the dead-letter topic
+      acks: all
 
 server:
   port: ${PORT:8081}
@@ -33,3 +42,12 @@ management:
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+
+logging:
+  pattern:
+    # Spring Boot adds this to every log line; filled from the MDC by CorrelationIdFilter
+    correlation: "[%X{correlationId:-}] "
+
+cardflow:
+  events:
+    topic: transactions.authorized

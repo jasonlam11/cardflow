@@ -1,4 +1,4 @@
-# Ecosystems for pip and npm get added here as each service is created.
+# Ecosystems for npm get added here when the dashboard is created.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -22,3 +22,18 @@ updates:
     groups:
       spring:
         patterns: ["org.springframework*", "org.springdoc*"]
+  - package-ecosystem: maven
+    directory: /services/authorization-service
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+    groups:
+      spring:
+        patterns: ["org.springframework*", "org.springdoc*"]
+  - package-ecosystem: pip
+    directories: ["/simulator", "/tests/e2e"]
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore

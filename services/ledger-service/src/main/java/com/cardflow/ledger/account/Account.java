@@ -14,6 +14,7 @@ import jakarta.persistence.PostLoad;
 import jakarta.persistence.PostPersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
+import com.cardflow.ledger.common.DbTime;
 
 /**
  * A ledger account. There is deliberately no balance field: balances are
@@ -39,6 +40,10 @@ public class Account implements Persistable<UUID> {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    /** Link to another service's entity, e.g. "card:&lt;uuid&gt;"; null for manually created accounts. */
+    @Column(name = "external_ref", length = 100, updatable = false)
+    private String externalRef;
+
     /** Required by JPA; not for application use. */
     protected Account() {
     }
@@ -48,7 +53,7 @@ public class Account implements Persistable<UUID> {
         this.name = name;
         this.type = type;
         this.currency = currency;
-        this.createdAt = Instant.now();
+        this.createdAt = DbTime.now();
     }
 
     /**
@@ -88,5 +93,9 @@ public class Account implements Persistable<UUID> {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public String getExternalRef() {
+        return externalRef;
     }
 }

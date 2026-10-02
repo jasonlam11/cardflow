@@ -18,6 +18,7 @@ A running guide to how CardFlow is built and **why**. It's updated as each phase
 6. [Concepts glossary](#6-concepts-glossary)
 7. [Common commands & troubleshooting](#7-common-commands--troubleshooting)
 8. [ledger-service (Phase 1)](#8-ledger-service-phase-1)
+9. [Authorization and events (Phase 2)](#9-authorization-and-events-phase-2)
 
 ---
 
@@ -176,6 +177,16 @@ Short version of every decision, newest at the bottom. The big ones also get a f
 | 19 | RFC 9457 Problem Details for errors | Standard, machine-readable, no stack traces | Custom error JSON | – |
 | 20 | Account history returns this account's lines, not whole transactions | That's what a statement shows; avoids paginating over a join fetch | Return full transactions | – |
 | 21 | Multi-stage Docker image, JRE runtime, non-root | Smaller attack surface; no build tools in production | Single-stage JDK image running as root | – |
+| 22 | Transactional outbox + polling relay | Event exists iff the authorization committed; survives Kafka outages | Direct publish, 2PC, Debezium CDC | [0005](adr/0005-transactional-outbox.md) |
+| 23 | Idempotency-Key header + request hash, unique constraint | Retries can't double-charge; concurrent duplicates resolved by the DB | Client-side dedupe only; no key | [0006](adr/0006-idempotency.md) |
+| 24 | Idempotent consumer via `processed_events` in the same transaction | Kafka is at-least-once | Kafka exactly-once transactions (don't cover the DB write) | [0006](adr/0006-idempotency.md) |
+| 25 | `SELECT ... FOR UPDATE` on the card row | Concurrent charges can't overspend a limit | Optimistic locking with retries; a stored balance | – |
+| 26 | Declines return 200, approvals 201 | The request was valid; "no" is a normal business answer, not an error | 402/4xx for declines | – |
+| 27 | Events keyed by card id, 3 partitions | Per-card ordering, parallelism across cards | Random key | – |
+| 28 | Topics created by a `kafka-init` container | Infrastructure owns topics; services can't create them by typo | Auto-create; NewTopic beans in services | – |
+| 29 | Dead-letter topic after 3 retries; poison messages skip retries | One bad event never blocks a partition, and nothing is silently dropped | Retry forever; log and skip | – |
+| 30 | Services share the JSON event contract, not Java classes | No compile-time coupling between services | A shared "events" library | – |
+| 31 | Correlation IDs via header → MDC → Kafka header | One ID traces a charge across both services' logs | No tracing until OpenTelemetry | – |
 
 ---
 
@@ -218,6 +229,19 @@ Plain-English definitions, added as each concept shows up.
 | **Mockito** | Creates fake objects for unit tests | `AccountServiceTest` |
 | **Problem Details (RFC 9457)** | Standard JSON format for API errors | `ApiExceptionHandler` |
 | **Multi-stage build** | A Dockerfile that builds in one image and ships only the result in another | Dockerfile |
+| **Idempotent** | Doing it twice has the same effect as doing it once | API and consumer |
+| **Idempotency key** | A unique ID the client sends with a request so retries can be recognized | `POST /authorizations` |
+| **Dual write** | Writing to two systems (DB + Kafka) separately; one can fail, leaving them inconsistent | What the outbox avoids |
+| **Transactional outbox** | Save the event in the same DB transaction as the change, publish it afterwards | authorization-service |
+| **At-least-once delivery** | Every message arrives, possibly more than once | Kafka, outbox relay |
+| **Consumer group** | Consumers sharing a group split a topic's partitions; each message goes to one of them | `ledger-service` group |
+| **Partition / key** | A topic is split into ordered partitions; messages with the same key go to the same one | Keyed by card id |
+| **Offset commit** | A consumer recording "I've processed up to here" | After the DB commit |
+| **Dead-letter topic (DLT)** | Where messages go after they can't be processed | `transactions.authorized.DLT` |
+| **Pessimistic lock** | `SELECT ... FOR UPDATE`: lock the row so others wait | Card row during authorization |
+| **SKIP LOCKED** | Skip rows another transaction has locked instead of waiting | Outbox relay |
+| **MDC** | Mapped Diagnostic Context: per-thread values added to every log line | Correlation ID |
+| **Persistence context / flush** | Hibernate holds changes in memory and sends them to the DB at flush | The saveAndFlush bug |
 
 ---
 
@@ -246,6 +270,10 @@ docker exec -it cardflow-postgres psql -U ledger_svc -d ledger
 | Code change not visible in the running service | The Compose image wasn't rebuilt | `make build` |
 | Tests fail with "Could not find a valid Docker environment" | Testcontainers needs Docker running | Start Docker Desktop |
 | `ledger-service` unhealthy in Compose | Usually a DB login issue | `make logs s=ledger-service` and check `LEDGER_DB_PASSWORD` in `.env` |
+| Services never start; `kafka-init` keeps waiting | Kafka unhealthy | `make logs s=kafka` |
+| Ledger balances lag behind approvals | Kafka down, or the outbox relay is failing | `SELECT COUNT(*) FROM outbox_events WHERE published_at IS NULL` in the `authorization` DB; check `last_error` |
+| Image builds take forever | First Maven download inside Docker | Later builds reuse the `~/.m2` cache mount |
+| A charge was declined unexpectedly | Check `declineReason` | Common: `INSUFFICIENT_CREDIT` once a card's limit is used up |
 
 ---
 
@@ -314,3 +342,78 @@ A stored `balance` column has to be updated on every posting. If any update is m
 | API | `AccountApiTest`, `TransactionApiTest`, `AccountHistoryApiTest`, `BalanceApiTest` | Full HTTP → DB → HTTP behavior, validation, error format |
 
 Integration tests use **Testcontainers**: Docker starts a throwaway Postgres 18.6, Flyway migrates it, and the tests run against the real database. That catches problems that an in-memory fake database (like H2) would hide, such as our triggers.
+
+---
+
+## 9. Authorization and events (Phase 2)
+
+### The full path of one charge
+```
+simulator ── POST /authorizations ─────────────────────────────▶ authorization-service
+             Idempotency-Key: 9f1c…                                │
+             X-Correlation-Id: abc                                 │ (key seen before? → return stored result)
+                                                                   ▼
+                                     ┌────────── ONE database transaction ──────────┐
+                                     │ SELECT card FOR UPDATE      (lock the card)   │
+                                     │ rules: exists? active? currency? ≤ available? │
+                                     │ INSERT authorizations       (unique key)      │
+                                     │ INSERT outbox_events        (approved only)   │
+                                     └──────────────────────────────── COMMIT ──────┘
+                                                                   │
+                                OutboxRelay, every 500 ms:         ▼
+                                FOR UPDATE SKIP LOCKED → send (acks=all) → published_at = now()
+                                                                   │
+                                          Kafka: transactions.authorized (3 partitions, key = card id)
+                                                                   │
+                                                                   ▼
+                                     ┌──────── ledger-service, ONE transaction ─────┐
+                                     │ INSERT processed_events(event_id)  dup → skip │
+                                     │ find/create card:<id> (ASSET)                 │
+                                     │ find/create merchant:<id> (LIABILITY)         │
+                                     │ post DEBIT card / CREDIT merchant             │
+                                     └──────────────────────────────── COMMIT ──────┘
+                                                                   │
+                                                          commit Kafka offset
+```
+
+### Why each piece exists: what breaks without it
+| Without… | What goes wrong |
+|---|---|
+| Idempotency key | The client times out, retries, and the customer is charged twice |
+| Request hash | A buggy client reuses a key for a different purchase and silently gets the old answer |
+| Unique constraint on the key | Two identical requests arriving at once both pass the "seen before?" check |
+| `FOR UPDATE` on the card | 20 simultaneous $10 charges on a $100 card all see $100 available; you approve $200 |
+| Outbox | Commit, then crash before publishing: a real charge never reaches the ledger |
+| Relay waits for `acks=all` | Kafka "accepted" a message it hadn't safely stored; it's lost if the broker dies |
+| `processed_events` | Kafka redelivers after a rebalance and the ledger posts the charge twice |
+| Offset commit after DB commit | Offset committed, then the DB write fails: the event is skipped forever |
+| Dead-letter topic | One malformed message is retried forever and blocks every message behind it |
+| Correlation ID | A support ticket says "my charge is missing" and there's no way to follow it across services |
+
+### Proof (all automated)
+| Claim | Test |
+|---|---|
+| 20 parallel charges on a $100 card approve exactly $100 | `AuthorizationConcurrencyTest` |
+| 10 simultaneous duplicates create 1 authorization and 1 event | `AuthorizationConcurrencyTest` |
+| Same key + different body is rejected | `AuthorizationApiTest` |
+| Events survive Kafka being unreachable | `OutboxRelayTest`, and e2e `test_kafka_outage_loses_no_transactions` |
+| Same event delivered 3× posts once | `TransactionAuthorizedConsumerTest` |
+| Poison message goes to the DLT | `TransactionAuthorizedConsumerTest` |
+| Every approval reaches the ledger exactly once | e2e `test_charges_flow_to_ledger_exactly_once` |
+
+**Measured (1,000-charge simulation, 25 cards, 50/s):** 926 approved, 74 declined, 44 retries all replayed; 926 ledger postings, 0 duplicates, totals equal to the cent ($113,453.36); publish lag p50 284 ms / p95 531 ms; 0 messages in the DLT.
+
+### Gotchas we hit
+1. **Hibernate holds inserts until flush.** The consumer called `save()` (JPA), then ran plain JDBC that referenced the new row. JDBC goes straight to the database, which hadn't received the INSERT yet, so the foreign key failed. Every event failed and was retried. Fix: `saveAndFlush()`. Lesson: don't mix JPA and JDBC in one transaction without flushing.
+2. **`@ServiceConnection` bypasses properties.** Testcontainers gave Spring the broker address directly, so a test reading `spring.kafka.bootstrap-servers` got the default `localhost:9092`, which was the *Compose* Kafka. Fix: read `KafkaConnectionDetails`.
+3. **Consumers don't notice new topics quickly.** Subscribing before a topic exists can mean waiting minutes for a metadata refresh. Fix: create topics up front (`kafka-init` in Compose, `NewTopic` beans in tests).
+4. **`@Validated` on a controller changes the exception type.** It switched header validation to the AOP path, which threw an unmapped exception (a 500). Removing it uses Spring MVC's built-in validation, which returns a 400.
+5. **Postgres `jsonb` reformats JSON** (adds spaces, reorders keys), so tests must parse it, not string-match.
+6. **Clock precision differs by OS.** Linux `Instant.now()` has nanoseconds; Postgres stores microseconds. The first response used the in-memory value and the idempotent replay used the stored one, so they differed in the last 3 digits. It passed on macOS, whose clock only reports microseconds, and failed in Linux CI. Fix: `DbTime.now()` truncates every timestamp to microseconds when it's created. Lesson: make values match what the database will store *before* you return them.
+7. **Unused test dependencies cost real time.** `spring-boot-starter-kafka-test` pulled in an embedded Kafka broker plus a 60 MB native library that timed out inside Docker. We use Testcontainers, so it was removed.
+
+### Known limitations (deliberately out of scope)
+- Idempotency keys and `processed_events` are kept forever; production would expire them.
+- Published outbox rows aren't cleaned up.
+- No reversals, refunds or settlement yet: an authorization is treated as final.
+- Available credit sums all approvals; with millions per card you'd keep a running total updated under the same row lock.

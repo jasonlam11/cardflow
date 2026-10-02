@@ -15,6 +15,7 @@ import com.cardflow.ledger.account.AccountRepository;
 import com.cardflow.ledger.common.NotFoundException;
 import com.cardflow.ledger.transaction.TransactionDtos.EntryRequest;
 import com.cardflow.ledger.transaction.TransactionDtos.PostTransactionRequest;
+import com.cardflow.ledger.common.DbTime;
 
 @Service
 public class TransactionService {
@@ -39,12 +40,14 @@ public class TransactionService {
 
         validator.validate(request, referenced);
 
-        Instant occurredAt = request.occurredAt() != null ? request.occurredAt() : Instant.now();
+        Instant occurredAt = request.occurredAt() != null ? DbTime.truncate(request.occurredAt()) : DbTime.now();
         LedgerTransaction txn = new LedgerTransaction(request.description(), occurredAt);
         for (EntryRequest e : request.entries()) {
             txn.addEntry(e.accountId(), e.direction(), e.amountMinor(), request.currency());
         }
-        return transactions.save(txn);
+        // Flush now: callers may run plain JDBC next (e.g. the event consumer), which can't
+        // see inserts Hibernate is still holding in memory
+        return transactions.saveAndFlush(txn);
     }
 
     @Transactional(readOnly = true)

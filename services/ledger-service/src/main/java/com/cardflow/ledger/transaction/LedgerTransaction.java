@@ -18,6 +18,7 @@ import jakarta.persistence.PostLoad;
 import jakarta.persistence.PostPersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
+import com.cardflow.ledger.common.DbTime;
 
 /**
  * A balanced group of ledger entries recorded together (a "journal entry").
@@ -51,7 +52,7 @@ public class LedgerTransaction implements Persistable<UUID> {
         this.id = UUID.randomUUID();
         this.description = description;
         this.occurredAt = occurredAt;
-        this.createdAt = Instant.now();
+        this.createdAt = DbTime.now();
     }
 
     public void addEntry(UUID accountId, Direction direction, long amountMinor, String currency) {
