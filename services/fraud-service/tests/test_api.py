@@ -100,3 +100,10 @@ def test_health_and_model_endpoints(client):
     info = client.get("/model").json()
     assert info["thresholds"]["high"] >= info["thresholds"]["review"]
     assert info["testMetrics"]["prAuc"] > 0.5
+
+
+def test_metrics_endpoint_counts_scores(client):
+    client.post("/score", json=body("metrics-1"))
+    text = client.get("/metrics").text
+    assert "fraud_score_seconds_bucket" in text
+    assert 'fraud_scores_total{band="LOW"}' in text

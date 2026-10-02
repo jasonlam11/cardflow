@@ -1,0 +1,19 @@
+{
+  "authorizations_by_status": {
+    "APPROVED": 11958
+  },
+  "events_created": 11958,
+  "events_unpublished": 0,
+  "events_posted_to_ledger": 11958,
+  "outbox_publish_ms": {
+    "p50": 268,
+    "p95": 510,
+    "max": 2296
+  },
+  "approval_to_ledger_ms": {
+    "p50": 335,
+    "p95": 671,
+    "max": 3556
+  },
+  "duplicate_ledger_postings": 0
+}

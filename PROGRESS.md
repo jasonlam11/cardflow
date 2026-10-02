@@ -1,6 +1,6 @@
 # Progress
 
-## Current phase: 5, AI assistant
+## Current phase: 6, polish (performance, observability, docs)
 
 ### Session log
 
@@ -56,37 +56,56 @@
   - Dashboard /assistant chat page with source chips and guardrail notes; Playwright chat tests
   - ADR 0011 (RAG), ADR 0012 (LLM interface + guardrails); NOTES §12
 
+- Phase 5 merged (PR #14); Dependabot #10 merged, #11–#13 closed
+- **Phase 6** (branch `phase-6-polish`):
+  - Prometheus metrics in all services (business metrics incl. `scored_by`, outbox backlog/age, ledger posted/duplicate/dead-lettered, LLM tokens/cost); ECS JSON logs with correlation IDs in Compose
+  - k6 steady (constant arrival rate, 10% idempotent retries) and breakpoint tests; `perf/report.py` pipeline report
+  - Found and fixed 3 bottlenecks: outbox relay capped at 200 events/s (drain loop), single ledger consumer (concurrency 3), fraud-service saturation/cold workers (3 httptools+uvloop workers, warm-up)
+  - Security CI: npm audit + pip-audit on PRs; Trivy image scan on main/weekly; baseline 0 known vulnerabilities
+  - Alpine JRE images (611/619 → 469 MB)
+  - `make demo` one-command populated stack; demo GIF; README rewrite; ADR index; ADR 0013 (observability); NOTES §13
+  - Fresh-clone stranger test: fixed a repeat-`make demo` idempotency-key collision and a flaky cold pip install
+  - Freed 6.6 GB (Docker build cache) when disk hit 1.3 GB free
+
 ### Next
-- [ ] CI green on Phase 5 PR, then merge
+- [ ] CI green on Phase 6 PR, then merge
+- [ ] Phase 7 plan: AWS with Terraform (cost estimate and approval before creating anything)
 - [ ] Add an Anthropic API key and run `make eval-claude ARGS=--confirm-cost` for real-model metrics (~$0.50 on Haiku 4.5)
 - [ ] Explain-back questions for Phases 2–5 (YOUR TURN)
-- [ ] Phase 6 plan: load test (k6), structured logs/metrics, ADR wrap-up, README polish, demo GIF
 - [x] PR #1 merged (Phase 0 complete)
 - [x] Java 25.0.4.1 LTS installed (Homebrew, native arm64) and set as default in ~/.zprofile
 
 ### Open issues
-- ledger-service image is 567 MB; shrink in Phase 6 (jlink or a smaller base image)
 - Balance reads SUM all entries; add snapshots if volume ever requires it (ADR 0003)
 - Idempotency keys, processed_events and published outbox rows are never cleaned up (ADR 0005/0006)
 - Simulator's `make simulate` rebuilds images on first run, which can take a while
 - Fraud model weakest on amount spikes (46% offline, 23% live recall)
 - fraud-service `card_activity` never pruned; fallback rules duplicated in Java and Python
-- fraud-service image is 596 MB (numpy + xgboost); slim down in Phase 6
+- fraud-service image is ~600 MB (numpy + xgboost); assistant 828 MB (embedding model + ONNX runtime)
 - Analyst identity is self-declared; the admin key authenticates the dashboard, not the person (ADR 0009)
 - Review queue lists the 50 oldest; no search beyond deep links and transaction filters
 - Assistant model-quality metrics not measured yet (no API key); demo-mode numbers measure the pipeline only
 - Haiku 4.5 won't prompt-cache our ~2k-token prefix (needs 4,096+)
-- One Python e2e failure right after a stack restart (passed 3x after); watch for a startup race
-- Disk: ~5.5 GB free; assistant image is 827 MB
+- One Python e2e failure right after a stack restart (not reproduced in 3 runs; likely cold fraud workers, now warmed up at startup)
+- Disk is tight (~7 GB free after pruning); Docker build cache regrows with every build
+- Above ~200 req/s on the laptop, fraud-service saturates and charges fall back to rules (by design; visible in metrics)
+- No Grafana/Prometheus server yet (deferred to Phase 7)
 
 ## Metrics (real, measured numbers only)
 
 | Metric | Value | Measured |
 |---|---|---|
 | Services | 5 (ledger, authorization, fraud, assistant, dashboard) + simulator | 2026-10-02 |
-| Total tests | 222: ledger 50, authorization 55, fraud 27, assistant 37, simulator 16, dashboard unit 26, Playwright 9, e2e 4 | 2026-10-02 |
-| p95 authorization latency | – (single requests ~15 ms incl. fraud call ~5 ms; proper load test in Phase 6) | 2026-10-02 |
-| Throughput (req/s) | – (50/s simulated without errors; real load test in Phase 6) | |
+| Total tests | **232**, all passing: ledger 51, authorization 59, fraud 28, assistant 38, simulator 17, dashboard unit 26, Playwright 9, e2e 4 | 2026-10-02 |
+| p95 authorization latency | **28.9 ms** at 200 req/s for 2 min (p50 4.4 ms, p99 141.9 ms, 0 errors, 23,986 authorizations, 91.6% ML-scored); 15.3 ms at 100 req/s after a restart (99.9% ML-scored) | 2026-10-02 |
+| Throughput (req/s) | **200 req/s** with ML scoring (100% model-scored); HTTP layer to ~600 req/s before p95 > 200 ms (rules fallback above ~200) | 2026-10-02 |
+| Approval → ledger posting at 200 req/s | p50 321 ms / p95 509 ms; 0 unpublished, 0 duplicates | 2026-10-02 |
+| Bottleneck fixes at 600 req/s | outbox left unpublished 24,490 → 0; approval → ledger p95 57.2 s → 0.85 s | 2026-10-02 |
+| fraud-service stopped at 100 req/s | p95 6.4 ms, 0 errors (rules fallback) | 2026-10-02 |
+| Java image size | 611 / 619 MB → 469 MB (Alpine JRE) | 2026-10-02 |
+| Known vulnerabilities (npm audit, pip-audit, Trivy CRITICAL) | 0 | 2026-10-02 |
+| `make demo` populate time (built images) | 38 s: 1,348 charges, 20 awaiting review (replayed days: 437 approved, 64 fraud declines, 10 review) | 2026-10-02 |
+| Fresh clone → running demo (cold build) | ~8–10 min on M2 laptop; stranger test found and fixed 2 snags | 2026-10-02 |
 | Duplicate postings under retry/failure tests | **0** (1,000-charge sim with 44 retries: 926 approved = 926 posted; e2e Kafka outage: 0 lost) | 2026-10-01 |
 | Outbox publish lag | p50 284 ms, p95 531 ms (500 ms poll) | 2026-10-01 |
 | Fraud model, offline test (days 77–89) | PR-AUC **0.918**; review-or-decline 72.3% precision / 89.8% recall; auto-decline 87.1% precision; rules fallback 16.6% recall | 2026-10-02 |

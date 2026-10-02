@@ -55,6 +55,11 @@
 			<artifactId>resilience4j-circuitbreaker</artifactId>
 			<version>${resilience4j.version}</version>
 		</dependency>
+		<!-- Prometheus-format metrics at /actuator/prometheus (version managed by Spring Boot) -->
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-registry-prometheus</artifactId>
+		</dependency>
 		<dependency>
 			<groupId>org.flywaydb</groupId>
 			<artifactId>flyway-database-postgresql</artifactId>

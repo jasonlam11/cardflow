@@ -47,3 +47,12 @@ def test_info_and_correlation(retriever):
         r = c.get("/info", headers={"X-Correlation-Id": "abc-123"})
     assert r.headers["X-Correlation-Id"] == "abc-123"
     assert r.json()["provider"] == "scripted"
+
+
+def test_metrics_endpoint(retriever):
+    with client(retriever) as c:
+        c.post("/chat", json={"cardId": FIXTURE_CARD, "message": "What's my balance?"})
+        text = c.get("/metrics").text
+    assert 'assistant_chats_total{outcome="answered"}' in text
+    assert "assistant_chat_seconds_bucket" in text
+    assert "assistant_llm_cost_usd_total" in text

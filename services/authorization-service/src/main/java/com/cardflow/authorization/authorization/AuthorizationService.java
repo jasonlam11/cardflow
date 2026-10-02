@@ -8,6 +8,9 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
+
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -44,13 +47,18 @@ public class AuthorizationService {
     private final AuthorizationProcessor processor;
     private final CardAccountRepository cards;
     private final ResilientFraudScorer fraudScorer;
+    private final MeterRegistry metrics;
+    private final Counter replays;
 
     public AuthorizationService(AuthorizationRepository authorizations, AuthorizationProcessor processor,
-            CardAccountRepository cards, ResilientFraudScorer fraudScorer) {
+            CardAccountRepository cards, ResilientFraudScorer fraudScorer, MeterRegistry metrics) {
         this.authorizations = authorizations;
         this.processor = processor;
         this.cards = cards;
         this.fraudScorer = fraudScorer;
+        this.metrics = metrics;
+        this.replays = Counter.builder("cardflow.authorizations.replayed")
+                .description("Requests answered from a stored result (idempotent retries)").register(metrics);
     }
 
     public record Result(Authorization authorization, boolean replayed) {
@@ -64,6 +72,7 @@ public class AuthorizationService {
 
         Optional<Result> previous = replay(idempotencyKey, hash);
         if (previous.isPresent()) {
+            replays.increment();
             return previous.get();
         }
 
@@ -77,6 +86,12 @@ public class AuthorizationService {
                     auth.getStatus(), auth.getDeclineReason() == null ? "" : auth.getDeclineReason(),
                     auth.getAmountMinor(), fraud.band(), fraud.scoredBy(), (t1 - t0) / 1_000_000,
                     (t2 - t1) / 1_000_000);
+            Counter.builder("cardflow.authorizations")
+                    .description("Authorization decisions")
+                    .tag("status", auth.getStatus().name())
+                    .tag("fraud_band", fraud.band().name())
+                    .tag("scored_by", fraud.scoredBy().name())
+                    .register(metrics).increment();
             return new Result(auth, false);
         } catch (DataIntegrityViolationException e) {
             // Lost a race with a concurrent request using the same key

@@ -1,0 +1,59 @@
+name: security
+
+# Dependency audits on every PR, plus an image scan of every service, weekly and on demand.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1"   # Mondays 06:00 UTC: new CVEs appear even when the code doesn't change
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-audit:
+    name: Dependency audit (npm + pip)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: dashboard/.nvmrc
+      - name: npm audit (dashboard)
+        working-directory: dashboard
+        run: npm audit --audit-level=high
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: pip-audit (python services)
+        run: |
+          pip install pip-audit
+          for f in services/fraud-service/requirements.txt services/assistant-service/requirements.txt simulator/requirements.txt; do
+            echo "== $f"; pip-audit -r "$f"
+          done
+
+  image-scan:
+    name: Image scan (${{ matrix.service }})
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [ledger-service, authorization-service, fraud-service, assistant-service, dashboard]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build image
+        run: |
+          dir=services/${{ matrix.service }}; [ -d "$dir" ] || dir=${{ matrix.service }}
+          docker build -t cardflow/${{ matrix.service }}:scan "$dir"
+      - name: Trivy (fail on CRITICAL with a fix available)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: cardflow/${{ matrix.service }}:scan
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"

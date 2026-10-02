@@ -33,7 +33,15 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        # Internal network only (not published in AWS); Prometheus scrapes /actuator/prometheus
+        include: health,info,prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      # Histogram buckets so p95/p99 latency can be computed from Prometheus data
+      percentiles-histogram:
+        http.server.requests: true
   endpoint:
     health:
       probes:
@@ -62,7 +70,8 @@ cardflow:
   outbox:
     topic: transactions.authorized
     poll-interval-ms: 500
-    batch-size: 100
+    # Rows per publish round trip; full batches are drained back to back (see OutboxScheduler)
+    batch-size: 500
     send-timeout-ms: 10000
 
 logging:
