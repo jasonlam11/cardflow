@@ -23,7 +23,12 @@ public class FraudServiceClient {
     private final RestClient http;
 
     public FraudServiceClient(FraudProperties props) {
-        var jdk = HttpClient.newBuilder().connectTimeout(Duration.ofMillis(props.connectTimeoutMs())).build();
+        // JDK HttpClient pinned to HTTP/1.1: on plain http:// its HTTP/2 default first attempts an
+        // h2c upgrade, which fraud-service (uvicorn) doesn't speak
+        var jdk = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofMillis(props.connectTimeoutMs()))
+                .version(HttpClient.Version.HTTP_1_1)
+                .build();
         var factory = new JdkClientHttpRequestFactory(jdk);
         factory.setReadTimeout(Duration.ofMillis(props.readTimeoutMs()));
         // Spring Framework's builder (Boot 4's auto-configured one lives in an extra module we don't need)

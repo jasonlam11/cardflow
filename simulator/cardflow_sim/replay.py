@@ -8,6 +8,8 @@ fraud-service; they're sent but not counted in the metrics.
 
 import csv
 import time
+
+import httpx
 from collections import Counter
 from datetime import datetime, timedelta
 
@@ -27,6 +29,17 @@ def outcome(response) -> str:
     if body.get("declineReason") == "FRAUD_SUSPECTED":
         return "FRAUD_SUSPECTED"
     return body.get("status", "UNKNOWN")
+
+
+def _authorize_with_retry(client: AuthorizationClient, key: str, body: dict, attempts: int = 5):
+    """Retries dropped connections with the SAME idempotency key: safe, because a retry can't double-charge."""
+    for attempt in range(attempts):
+        try:
+            return client.authorize(key, body)
+        except httpx.TransportError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.5 * 2 ** attempt)
 
 
 def replay(client: AuthorizationClient, path: str, from_day: int, warmup_days: int, max_cards: int | None,
@@ -54,7 +67,7 @@ def replay(client: AuthorizationClient, path: str, from_day: int, warmup_days: i
         }
         if r["lat"]:
             body["merchantLocation"] = {"lat": float(r["lat"]), "lon": float(r["lon"]), "country": r["country"]}
-        resp = client.authorize(f"replay-{r['card_id'][:8]}-{i}", body)
+        resp = _authorize_with_retry(client, f"replay-{r['card_id'][:8]}-{i}", body)
         result = outcome(resp)
 
         if datetime.fromisoformat(r["ts"]) >= measure_from:

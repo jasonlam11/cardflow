@@ -67,12 +67,16 @@ public class AuthorizationService {
             return previous.get();
         }
 
+        long t0 = System.nanoTime();
         FraudAssessment fraud = assessFraud(idempotencyKey, request);
+        long t1 = System.nanoTime();
         try {
             Authorization auth = processor.process(idempotencyKey, hash, request, fraud);
-            log.info("Authorization {} {} {} amount={} fraud={}/{}", auth.getId(), auth.getStatus(),
-                    auth.getDeclineReason() == null ? "" : auth.getDeclineReason(), auth.getAmountMinor(),
-                    fraud.band(), fraud.scoredBy());
+            long t2 = System.nanoTime();
+            log.info("Authorization {} {} {} amount={} fraud={}/{} timing: fraud={}ms decision={}ms", auth.getId(),
+                    auth.getStatus(), auth.getDeclineReason() == null ? "" : auth.getDeclineReason(),
+                    auth.getAmountMinor(), fraud.band(), fraud.scoredBy(), (t1 - t0) / 1_000_000,
+                    (t2 - t1) / 1_000_000);
             return new Result(auth, false);
         } catch (DataIntegrityViolationException e) {
             // Lost a race with a concurrent request using the same key
