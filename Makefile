@@ -1,10 +1,17 @@
 .DEFAULT_GOAL := help
 COMPOSE := docker compose
 
-.PHONY: help env up build down ps logs reset-db test-ledger test-auth test-sim test-fraud test-assistant train eval eval-claude simulate e2e perf perf-breakpoint
+.PHONY: help demo env up build down ps logs reset-db test-ledger test-auth test-sim test-fraud test-assistant train eval eval-claude simulate e2e perf perf-breakpoint
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
+
+demo: env ## One command: build and start everything, fill it with realistic traffic, print the URL
+	$(COMPOSE) up -d --build --wait
+	$(COMPOSE) --profile sim run --rm --build simulator demo
+	@echo ""
+	@echo "  CardFlow is running:  http://127.0.0.1:3000"
+	@echo "  (review queue, transactions, assistant chat; API docs on :8081-:8084)"
 
 env: ## Create .env from .env.example if missing
 	@test -f .env || (cp .env.example .env && echo "Created .env, edit the passwords")

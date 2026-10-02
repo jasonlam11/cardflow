@@ -52,7 +52,13 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument("--rate", type=float, default=0, help="requests per second, 0 = as fast as possible")
     rp.add_argument("--results", default=None, help="optional CSV of per-transaction outcomes")
 
+    dm = sub.add_parser("demo", help="populate a fresh stack: small history replayed so fraud gets flagged")
+    dm.add_argument("--url", default=DEFAULT_URL)
+    dm.add_argument("--cards", type=int, default=60)
+
     args = p.parse_args(argv)
+    if args.command == "demo":
+        return _demo(args)
     if args.command == "dataset":
         return _dataset(args)
     if args.command == "replay":
@@ -79,6 +85,26 @@ def _replay(args) -> int:
         client.close()
     print("summary:", json.dumps(summary, sort_keys=True))
     return 1 if summary.get("ERROR") else 0
+
+
+def _demo(args) -> int:
+    """A quick, realistic population for the dashboard: ~20 days of history for a few dozen cards,
+    the last 4 days replayed through the API (fraud patterns included, so some charges are flagged)."""
+    import tempfile
+
+    path = os.path.join(tempfile.mkdtemp(), "demo.csv.gz")
+    rows = DatasetGenerator(seed=2026, cards=args.cards, days=20, fraud_episode_rate=1.5).generate()
+    write_csv(rows, path)
+    print(f"generated {len(rows)} synthetic transactions for {args.cards} cards; replaying the last days...", flush=True)
+    client = AuthorizationClient(args.url, timeout=10)
+    try:
+        summary = replay(client, path, from_day=16, warmup_days=6, max_cards=None, rate=60, results_path=None)
+    finally:
+        client.close()
+    flagged = summary.get("PENDING_REVIEW", 0) + summary.get("FRAUD_SUSPECTED", 0)
+    print(f"done: {summary.get('APPROVED', 0)} approved, {summary.get('FRAUD_SUSPECTED', 0)} declined as fraud, "
+          f"{summary.get('PENDING_REVIEW', 0)} waiting for review ({flagged} flagged in total)", flush=True)
+    return 0
 
 
 def _live(args) -> int:
