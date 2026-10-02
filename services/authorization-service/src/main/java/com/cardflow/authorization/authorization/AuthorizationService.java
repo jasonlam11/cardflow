@@ -1,5 +1,7 @@
 package com.cardflow.authorization.authorization;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -10,13 +12,20 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.cardflow.authorization.authorization.AuthorizationDtos.AuthorizationRequest;
+import com.cardflow.authorization.card.CardAccountRepository;
+import com.cardflow.authorization.card.CardStatus;
+import com.cardflow.authorization.common.BadRequestException;
 import com.cardflow.authorization.common.NotFoundException;
+import com.cardflow.authorization.fraud.FraudAssessment;
+import com.cardflow.authorization.fraud.ResilientFraudScorer;
+import com.cardflow.authorization.fraud.ScoreRequest;
 
 /**
  * Idempotency layer around {@link AuthorizationProcessor}.
  *
  * <ol>
  *   <li>Key seen before with the same request: return the original result (replay).</li>
+ *   <li>Score fraud BEFORE the DB transaction, so the network call never holds the card lock.</li>
  *   <li>Key seen before with a different request: reject (422).</li>
  *   <li>New key: process it. If an identical request raced us and committed
  *       first, the unique constraint fails our insert; we then return theirs.</li>
@@ -29,18 +38,28 @@ public class AuthorizationService {
 
     private static final Logger log = LoggerFactory.getLogger(AuthorizationService.class);
 
+    private static final Duration MAX_CLOCK_SKEW = Duration.ofMinutes(5);
+
     private final AuthorizationRepository authorizations;
     private final AuthorizationProcessor processor;
+    private final CardAccountRepository cards;
+    private final ResilientFraudScorer fraudScorer;
 
-    public AuthorizationService(AuthorizationRepository authorizations, AuthorizationProcessor processor) {
+    public AuthorizationService(AuthorizationRepository authorizations, AuthorizationProcessor processor,
+            CardAccountRepository cards, ResilientFraudScorer fraudScorer) {
         this.authorizations = authorizations;
         this.processor = processor;
+        this.cards = cards;
+        this.fraudScorer = fraudScorer;
     }
 
     public record Result(Authorization authorization, boolean replayed) {
     }
 
     public Result authorize(String idempotencyKey, AuthorizationRequest request) {
+        if (request.occurredAt() != null && request.occurredAt().isAfter(Instant.now().plus(MAX_CLOCK_SKEW))) {
+            throw new BadRequestException("occurredAt must not be in the future");
+        }
         String hash = RequestHasher.hash(request);
 
         Optional<Result> previous = replay(idempotencyKey, hash);
@@ -48,15 +67,36 @@ public class AuthorizationService {
             return previous.get();
         }
 
+        FraudAssessment fraud = assessFraud(idempotencyKey, request);
         try {
-            Authorization auth = processor.process(idempotencyKey, hash, request);
-            log.info("Authorization {} {} {} {}", auth.getId(), auth.getStatus(),
-                    auth.getDeclineReason() == null ? "" : auth.getDeclineReason(), auth.getAmountMinor());
+            Authorization auth = processor.process(idempotencyKey, hash, request, fraud);
+            log.info("Authorization {} {} {} amount={} fraud={}/{}", auth.getId(), auth.getStatus(),
+                    auth.getDeclineReason() == null ? "" : auth.getDeclineReason(), auth.getAmountMinor(),
+                    fraud.band(), fraud.scoredBy());
             return new Result(auth, false);
         } catch (DataIntegrityViolationException e) {
             // Lost a race with a concurrent request using the same key
             return replay(idempotencyKey, hash).orElseThrow(() -> e);
         }
+    }
+
+    /**
+     * Unknown, inactive or wrong-currency cards will be declined anyway, so they
+     * aren't scored (and don't pollute fraud-service's per-card history).
+     * This read is unlocked; the decision re-checks everything under the row lock.
+     */
+    private FraudAssessment assessFraud(String idempotencyKey, AuthorizationRequest r) {
+        var card = cards.findById(r.cardId());
+        if (card.isEmpty() || card.get().getStatus() != CardStatus.ACTIVE
+                || !card.get().getCurrency().equals(r.currency())) {
+            return FraudAssessment.notScored();
+        }
+        var loc = r.merchantLocation() == null ? null
+                : new ScoreRequest.Location(r.merchantLocation().lat(), r.merchantLocation().lon(),
+                        r.merchantLocation().country());
+        return fraudScorer.score(new ScoreRequest(idempotencyKey, r.cardId().toString(), r.amountMinor(), r.currency(),
+                r.mcc(), r.merchantId(), r.channel() == null ? "CARD_PRESENT" : r.channel().name(), loc,
+                r.occurredAt()));
     }
 
     @Transactional(readOnly = true)

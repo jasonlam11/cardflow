@@ -2,6 +2,8 @@ package com.cardflow.authorization.authorization;
 
 import com.cardflow.authorization.card.CardAccount;
 import com.cardflow.authorization.card.CardStatus;
+import com.cardflow.authorization.fraud.FraudAssessment;
+import com.cardflow.authorization.fraud.FraudBand;
 
 /**
  * Pure decision logic: no database, no Spring, so it's trivial to unit test.
@@ -14,9 +16,11 @@ public final class AuthorizationRules {
 
     /**
      * @param card            the card, or null if the request named an unknown card
-     * @param availableMinor  credit limit minus approved spend, before this charge
+     * @param availableMinor  credit limit minus approved and held spend, before this charge
+     * @param fraud           the fraud assessment (from the model or the fallback rules)
      */
-    public static Decision decide(CardAccount card, long availableMinor, long amountMinor, String currency) {
+    public static Decision decide(CardAccount card, long availableMinor, long amountMinor, String currency,
+            FraudAssessment fraud) {
         if (card == null) {
             return Decision.decline(DeclineReason.CARD_NOT_FOUND);
         }
@@ -29,7 +33,13 @@ public final class AuthorizationRules {
         if (amountMinor > availableMinor) {
             return Decision.decline(DeclineReason.INSUFFICIENT_CREDIT);
         }
-        // Phase 3: fraud-service score is checked here
+        if (fraud.band() == FraudBand.HIGH) {
+            return Decision.decline(DeclineReason.FRAUD_SUSPECTED);
+        }
+        if (fraud.band() == FraudBand.REVIEW) {
+            // The model never has the final word on borderline cases
+            return Decision.review();
+        }
         return Decision.approve();
     }
 }

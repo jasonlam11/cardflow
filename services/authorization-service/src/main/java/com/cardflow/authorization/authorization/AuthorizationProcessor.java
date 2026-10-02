@@ -8,13 +8,16 @@ import com.cardflow.authorization.authorization.AuthorizationDtos.AuthorizationR
 import com.cardflow.authorization.card.CardAccount;
 import com.cardflow.authorization.card.CardAccountRepository;
 import com.cardflow.authorization.common.CorrelationIdFilter;
+import com.cardflow.authorization.fraud.FraudAssessment;
 import com.cardflow.authorization.outbox.EventEnvelope;
 import com.cardflow.authorization.outbox.OutboxWriter;
 
 /**
  * Makes and records one authorization decision in a single DB transaction:
- * lock card → decide → insert authorization → insert outbox event.
- * Either all of it commits, or none of it does.
+ * lock card → decide → insert authorization → insert outbox event (approvals only).
+ * Either all of it commits, or none of it does. The fraud assessment is
+ * computed before this transaction, so no network call happens while the
+ * card row is locked.
  */
 @Component
 class AuthorizationProcessor {
@@ -30,18 +33,17 @@ class AuthorizationProcessor {
     }
 
     @Transactional
-    Authorization process(String idempotencyKey, String requestHash, AuthorizationRequest req) {
+    Authorization process(String idempotencyKey, String requestHash, AuthorizationRequest req, FraudAssessment fraud) {
         // Row lock: concurrent charges on this card queue up here, so each one
-        // sees the credit already used by the ones before it
+        // sees the credit already used (or held) by the ones before it
         CardAccount card = cards.findByIdForUpdate(req.cardId()).orElse(null);
         long available = card == null ? 0 : card.getCreditLimitMinor() - cards.sumApprovedMinor(card.getId());
 
-        Decision decision = AuthorizationRules.decide(card, available, req.amountMinor(), req.currency());
+        Decision decision = AuthorizationRules.decide(card, available, req.amountMinor(), req.currency(), fraud);
 
         String correlationId = MDC.get(CorrelationIdFilter.MDC_KEY);
-        Authorization auth = new Authorization(idempotencyKey, requestHash, card == null ? null : card.getId(),
-                req.merchantId(), req.merchantName(), req.mcc(), req.amountMinor(), req.currency(), decision,
-                correlationId);
+        Authorization auth = new Authorization(idempotencyKey, requestHash, card == null ? null : card.getId(), req,
+                decision, fraud, correlationId);
         // Flush now so a duplicate idempotency key fails here, before the outbox insert
         authorizations.saveAndFlush(auth);
 

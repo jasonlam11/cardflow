@@ -22,7 +22,8 @@ public interface CardAccountRepository extends JpaRepository<CardAccount, UUID> 
 
     @Query(value = """
             SELECT COALESCE(SUM(amount_minor), 0) FROM authorizations
-             WHERE card_account_id = :cardId AND status = 'APPROVED'
+             WHERE card_account_id = :cardId AND status IN ('APPROVED', 'PENDING_REVIEW')
             """, nativeQuery = true)
+    /** Approved charges plus charges held for review; both reduce available credit. */
     long sumApprovedMinor(@Param("cardId") UUID cardId);
 }

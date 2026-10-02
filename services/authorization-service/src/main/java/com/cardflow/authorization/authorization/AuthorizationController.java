@@ -33,8 +33,9 @@ public class AuthorizationController {
     }
 
     /**
-     * 201 approved, 200 declined (the request was valid; the answer is "no").
-     * A retry with the same key gets the original status and body back.
+     * 201 approved, 202 held for human review, 200 declined (the request was
+     * valid; the answer is "no"). A retry with the same key gets the original
+     * status and body back.
      */
     @PostMapping
     public ResponseEntity<AuthorizationResponse> authorize(
@@ -44,7 +45,11 @@ public class AuthorizationController {
             @Valid @RequestBody AuthorizationRequest request) {
         var result = authorizationService.authorize(idempotencyKey, request);
         Authorization auth = result.authorization();
-        HttpStatus status = auth.getStatus() == AuthorizationStatus.APPROVED ? HttpStatus.CREATED : HttpStatus.OK;
+        HttpStatus status = switch (auth.getStatus()) {
+            case APPROVED -> HttpStatus.CREATED;
+            case PENDING_REVIEW -> HttpStatus.ACCEPTED;
+            case DECLINED -> HttpStatus.OK;
+        };
         return ResponseEntity.status(status)
                 .location(URI.create("/authorizations/" + auth.getId()))
                 .header(REPLAYED, Boolean.toString(result.replayed()))

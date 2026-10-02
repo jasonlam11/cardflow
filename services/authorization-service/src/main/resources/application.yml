@@ -44,6 +44,18 @@ springdoc:
     path: /swagger-ui.html
 
 cardflow:
+  fraud:
+    url: ${FRAUD_URL:http://localhost:8083}
+    # Authorization waits at most ~0.5 s for fraud-service, then falls back to rules
+    connect-timeout-ms: 200
+    read-timeout-ms: 300
+    # Open the circuit when >= 50% of the last 20 calls failed (after at least 10);
+    # stay open 10 s, then let 3 test calls through
+    circuit-window-size: 20
+    circuit-minimum-calls: 10
+    circuit-failure-rate-percent: 50
+    circuit-open-seconds: 10
+    circuit-half-open-calls: 3
   outbox:
     topic: transactions.authorized
     poll-interval-ms: 500
