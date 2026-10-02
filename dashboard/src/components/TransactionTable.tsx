@@ -45,7 +45,13 @@ export function TransactionTable({ rows, compact = false }: { rows: Authorizatio
               <td className="py-2 pr-4 text-right font-mono whitespace-nowrap">{formatMoney(a.amountMinor, a.currency)}</td>
               <td className="py-2 pr-4">
                 <div className="flex flex-col items-start gap-1">
-                  <StatusBadge status={a.status} />
+                  {a.status === "PENDING_REVIEW" ? (
+                    <Link href={`/reviews?id=${a.id}`} title="Open in review queue">
+                      <StatusBadge status={a.status} />
+                    </Link>
+                  ) : (
+                    <StatusBadge status={a.status} />
+                  )}
                   {a.declineReason && <span className="text-xs text-slate-500">{humanize(a.declineReason)}</span>}
                 </div>
               </td>
@@ -57,8 +63,13 @@ export function TransactionTable({ rows, compact = false }: { rows: Authorizatio
                 </div>
               </td>
               {!compact && (
-                <td className="py-2 pr-4 text-xs text-slate-600 dark:text-slate-400" title={a.fraudReasons.map((r) => r.description).join("\n")}>
-                  {a.fraudReasons[0]?.description ?? "—"}
+                // Only flagged charges have "reasons": on a low-risk charge, the strongest positive
+                // contributions didn't make it risky, and showing them would mislead
+                <td
+                  className="py-2 pr-4 text-xs text-slate-600 dark:text-slate-400"
+                  title={a.fraudBand !== "LOW" ? a.fraudReasons.map((r) => r.description).join("\n") : undefined}
+                >
+                  {a.fraudBand && a.fraudBand !== "LOW" ? (a.fraudReasons[0]?.description ?? "—") : "—"}
                 </td>
               )}
             </tr>

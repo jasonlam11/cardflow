@@ -13,7 +13,9 @@ import { ErrorBox, Loading } from "./States";
 import { TransactionTable } from "./TransactionTable";
 
 /** One flagged charge, its reasons and card context, and the approve/reject controls. */
-export function ReviewPanel({ id, onResolved }: { id: string; onResolved?: () => void }) {
+export type ResolvedSummary = { status: string; label: string };
+
+export function ReviewPanel({ id, onResolved }: { id: string; onResolved?: (summary: ResolvedSummary) => void }) {
   const queryClient = useQueryClient();
   const { analyst } = useAnalyst();
   const [note, setNote] = useState("");
@@ -23,12 +25,16 @@ export function ReviewPanel({ id, onResolved }: { id: string; onResolved?: () =>
   const decide = useMutation({
     mutationFn: (decision: "APPROVE" | "REJECT") =>
       api.decide(id, { decision, analyst: analyst.trim(), note: note.trim() || undefined }),
-    onSuccess: () => {
+    onSuccess: (result) => {
       setNote("");
       queryClient.invalidateQueries({ queryKey: ["reviews"] });
       queryClient.invalidateQueries({ queryKey: ["stats"] });
       queryClient.invalidateQueries({ queryKey: ["review", id] });
-      onResolved?.();
+      const a = detail.data?.authorization;
+      onResolved?.({
+        status: result.newStatus,
+        label: a ? `${formatMoney(a.amountMinor, a.currency)} at ${a.merchantName}` : result.authorizationId,
+      });
     },
     onError: (e) => {
       // Someone else resolved it first: refresh so the panel shows the real state

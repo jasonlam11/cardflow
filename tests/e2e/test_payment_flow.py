@@ -1,4 +1,5 @@
 import random
+import uuid
 
 from conftest import auth_sql, charge, compose, create_card, ledger_sql, spaced_times, wait_until
 
@@ -25,12 +26,13 @@ def card_balance(card_id: str) -> int:
 def test_charges_flow_to_ledger_exactly_once(auth):
     card = create_card(auth, limit=200_000)
     rng = random.Random(42)
+    run = uuid.uuid4().hex[:8]  # keys must be unique per run: the stack keeps every key it has seen
     approved: dict[str, int] = {}
     retries = 0
 
     for when in spaced_times(40):
         amount = rng.randint(100, 9_000)
-        key = f"e2e-{rng.getrandbits(64):x}"
+        key = f"e2e-{run}-{rng.getrandbits(64):x}"
         r = charge(auth, card, amount, key, occurred_at=when)
         assert r.status_code in (200, 201, 202), r.text
         if r.status_code == 201:

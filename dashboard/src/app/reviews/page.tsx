@@ -1,16 +1,31 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 
 import { BandBadge } from "@/components/Badges";
-import { ReviewPanel } from "@/components/ReviewPanel";
+import { ReviewPanel, type ResolvedSummary } from "@/components/ReviewPanel";
 import { Empty, ErrorBox, Loading } from "@/components/States";
 import { api } from "@/lib/api";
 import { formatMoney, formatScore, maskCard, timeAgo } from "@/lib/format";
 
-export default function ReviewQueue() {
-  const [selected, setSelected] = useState<string | null>(null);
+/** useSearchParams needs a Suspense boundary so the rest of the page can be prerendered. */
+export default function ReviewQueuePage() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <ReviewQueue />
+    </Suspense>
+  );
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function ReviewQueue() {
+  // Deep link: /reviews?id=<authorization> opens that charge even if it isn't on the first page of the queue
+  const linked = useSearchParams().get("id");
+  const [selected, setSelected] = useState<string | null>(linked && UUID.test(linked) ? linked : null);
+  const [lastResolved, setLastResolved] = useState<ResolvedSummary | null>(null);
   const queue = useQuery({ queryKey: ["reviews"], queryFn: () => api.reviews(), refetchInterval: 3_000 });
 
   const items = queue.data?.content ?? [];
@@ -21,7 +36,12 @@ export default function ReviewQueue() {
     <div className="space-y-4">
       <div className="flex items-baseline gap-3">
         <h1 className="text-2xl font-semibold">Review queue</h1>
-        {queue.data && <span className="text-sm text-slate-500">{queue.data.totalElements} waiting · oldest first</span>}
+        {queue.data && (
+          <span className="text-sm text-slate-500">
+            {queue.data.totalElements} waiting · oldest first
+            {queue.data.totalElements > items.length ? ` · showing the ${items.length} oldest` : ""}
+          </span>
+        )}
       </div>
       {queue.isPending ? (
         <Loading />
@@ -34,7 +54,10 @@ export default function ReviewQueue() {
             {items.map((a) => (
               <li key={a.id}>
                 <button
-                  onClick={() => setSelected(a.id)}
+                  onClick={() => {
+                    setSelected(a.id);
+                    setLastResolved(null);
+                  }}
                   aria-current={current === a.id ? "true" : undefined}
                   className={`w-full rounded-lg border p-3 text-left ${current === a.id ? "border-slate-900 bg-white dark:border-slate-100 dark:bg-slate-900" : "border-slate-200 bg-white hover:border-slate-400 dark:border-slate-800 dark:bg-slate-900"}`}
                 >
@@ -51,12 +74,30 @@ export default function ReviewQueue() {
               </li>
             ))}
           </ul>
+          <div className="space-y-4">
+            {lastResolved && (
+              <p
+                role="status"
+                className={`rounded-md p-3 text-sm ${lastResolved.status === "APPROVED" ? "bg-emerald-50 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200" : "bg-rose-50 text-rose-900 dark:bg-rose-950 dark:text-rose-200"}`}
+              >
+                {lastResolved.status === "APPROVED" ? "Approved" : "Rejected"}: {lastResolved.label}. Showing the next charge in the queue.
+              </p>
+            )}
           <div className="rounded-lg border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
             {current ? (
-              <ReviewPanel key={current} id={current} onResolved={() => setSelected(null)} />
+              <ReviewPanel
+                key={current}
+                id={current}
+                onResolved={(summary) => {
+                  // Advance to the next (oldest) item, and confirm what just happened
+                  setLastResolved(summary);
+                  setSelected(null);
+                }}
+              />
             ) : (
               <Empty>Select a charge to review.</Empty>
             )}
+          </div>
           </div>
         </div>
       )}
