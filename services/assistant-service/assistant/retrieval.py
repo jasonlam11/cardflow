@@ -10,12 +10,14 @@ log = logging.getLogger("assistant.retrieval")
 
 
 class Retriever:
-    def __init__(self, store: VectorStore, embedder: Embedder, k: int = 4, min_score: float = 0.45):
+    def __init__(self, store: VectorStore, embedder: Embedder, k: int = 4, min_score: float = 0.5):
         self.store = store
         self.embedder = embedder
         self.k = k
-        # Below this similarity a section is unlikely to answer the question; dropping it
-        # makes "I don't know" more likely than a confident answer from an unrelated section
+        # Only drops CLEARLY irrelevant sections. Measured on the eval set (bge-small): expected
+        # sections score 0.685-0.882, but unanswerable questions still pull in sections up to 0.677.
+        # The bands nearly touch, so "is this answerable?" is decided by the model + citation
+        # guardrail, not by a similarity threshold (see ADR 0011).
         self.min_score = min_score
 
     def index(self, chunks: list[Chunk]) -> bool:
