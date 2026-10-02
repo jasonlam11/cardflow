@@ -5,13 +5,15 @@ WORKDIR /src
 
 # Download dependencies first so they're cached unless pom.xml changes.
 # The cache mount keeps ~/.m2 between builds, so even a pom change only fetches what's new.
+# sharing=locked: parallel builds (compose builds services concurrently) take turns,
+# otherwise two Maven wrappers race to unpack Maven into the same directory.
 COPY mvnw pom.xml ./
 COPY .mvn .mvn
-RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -ntp dependency:go-offline
+RUN --mount=type=cache,target=/root/.m2,sharing=locked ./mvnw -B -ntp dependency:go-offline
 
 COPY src src
 # Tests run in CI (they need Docker for Testcontainers), not inside the image build
-RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -ntp package -DskipTests
+RUN --mount=type=cache,target=/root/.m2,sharing=locked ./mvnw -B -ntp package -DskipTests
 
 # ---- Runtime stage: JRE only, non-root -----------------------------------
 FROM eclipse-temurin:25-jre-noble
