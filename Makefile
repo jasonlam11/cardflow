@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 COMPOSE := docker compose
 
-.PHONY: help env up build down ps logs reset-db test-ledger test-auth test-sim test-fraud test-assistant train eval eval-claude simulate e2e
+.PHONY: help env up build down ps logs reset-db test-ledger test-auth test-sim test-fraud test-assistant train eval eval-claude simulate e2e perf perf-breakpoint
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -46,6 +46,16 @@ simulate: ## Send synthetic traffic (make simulate ARGS="--cards 20 --charges 50
 
 e2e: ## End-to-end tests against the stack (E2E_START_STACK=1 to start it via Testcontainers)
 	cd tests/e2e && python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt && .venv/bin/pytest -v
+
+perf: ## k6 steady load against the running stack (RATE=100 DURATION=2m), then the pipeline report
+	@START=$$(date -u +"%Y-%m-%d %H:%M:%S"); \
+	docker run --rm -i --network cardflow_default -v "$(CURDIR)/perf:/perf" -e RATE=$(or $(RATE),100) -e DURATION=$(or $(DURATION),2m) \
+	  grafana/k6:2.3.0 run --summary-export /perf/results/steady.json /perf/steady.js; \
+	sleep 10; python3 perf/report.py --since "$$START" | tee perf/results/pipeline.json
+
+perf-breakpoint: ## k6 ramp until p95 > 200 ms or errors > 1% (finds max sustainable req/s)
+	docker run --rm -i --network cardflow_default -v "$(CURDIR)/perf:/perf" -e MAX_RATE=$(or $(MAX_RATE),600) \
+	  grafana/k6:2.3.0 run --summary-export /perf/results/breakpoint.json /perf/breakpoint.js
 
 down: ## Stop the stack (keeps data)
 	$(COMPOSE) down
