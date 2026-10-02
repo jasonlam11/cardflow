@@ -56,7 +56,7 @@ test.describe.serial("human review", () => {
 
     const clicked = Date.now();
     await page.getByLabel(/Note/).fill("Cardholder confirmed by phone");
-    await page.getByRole("button", { name: "Approve" }).click();
+    await page.getByRole("button", { name: "Approve", exact: true }).click();
     // Confirmation, then the panel advances to the next charge in the queue
     await expect(page.getByRole("status").filter({ hasText: `Approved: $2,500.00 at E2E Approve ${RUN}` })).toBeVisible();
 
@@ -78,12 +78,12 @@ test.describe.serial("human review", () => {
     await page.getByLabel("Analyst").fill(ANALYST);
     await expect(page.getByRole("heading", { name: `$2,600.00 at E2E Reject ${RUN}` })).toBeVisible();
 
-    await page.getByRole("button", { name: "Reject" }).click();
+    await page.getByRole("button", { name: "Reject", exact: true }).click();
     // (Next.js also renders an empty role="alert" route announcer, so match ours by text)
     await expect(page.getByRole("alert").filter({ hasText: "Add a note" })).toBeVisible();
 
     await page.getByLabel(/Note/).fill("Cardholder does not recognise it");
-    await page.getByRole("button", { name: "Reject" }).click();
+    await page.getByRole("button", { name: "Reject", exact: true }).click();
     await expect(page.getByRole("status").filter({ hasText: `Rejected: $2,600.00 at E2E Reject ${RUN}` })).toBeVisible();
 
     // Only the approved $2,500 still uses credit; the rejected hold is released
