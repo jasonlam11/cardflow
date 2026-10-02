@@ -96,7 +96,7 @@
 | Metric | Value | Measured |
 |---|---|---|
 | Services | 5 (ledger, authorization, fraud, assistant, dashboard) + simulator | 2026-10-02 |
-| Total tests | **231**, all passing: ledger 51, authorization 59, fraud 28, assistant 38, simulator 16, dashboard unit 26, Playwright 9, e2e 4 | 2026-10-02 |
+| Total tests | **232**, all passing: ledger 51, authorization 59, fraud 28, assistant 38, simulator 17, dashboard unit 26, Playwright 9, e2e 4 | 2026-10-02 |
 | p95 authorization latency | **28.9 ms** at 200 req/s for 2 min (p50 4.4 ms, p99 141.9 ms, 0 errors, 23,986 authorizations, 91.6% ML-scored); 15.3 ms at 100 req/s after a restart (99.9% ML-scored) | 2026-10-02 |
 | Throughput (req/s) | **200 req/s** with ML scoring (100% model-scored); HTTP layer to ~600 req/s before p95 > 200 ms (rules fallback above ~200) | 2026-10-02 |
 | Approval → ledger posting at 200 req/s | p50 321 ms / p95 509 ms; 0 unpublished, 0 duplicates | 2026-10-02 |

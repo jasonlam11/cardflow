@@ -37,7 +37,7 @@ Then open **http://127.0.0.1:3000**:
 | **Resilience** | fraud-service stopped under load: p95 6.4 ms, 0 errors (circuit breaker + rules fallback) | [ADR 0007](docs/adr/0007-circuit-breaker-fallback.md) |
 | **Human review** | Approve → ledger posted in ~0.5–1.4 s; two analysts deciding at once → exactly one wins | [ADR 0010](docs/adr/0010-human-review-audit-trail.md) |
 | **Assistant** | Retrieval recall@4 **100%** on a 36-question eval; every answer cited or replaced by "I don't know"; 0 injection leaks (demo mode; real-model eval on demand) | [eval results](docs/eval-results.md) |
-| **Tests** | **231** across unit, integration (Testcontainers), browser (Playwright) and end-to-end suites, all in CI | [Testing](#testing) |
+| **Tests** | **232** across unit, integration (Testcontainers), browser (Playwright) and end-to-end suites, all in CI | [Testing](#testing) |
 
 ## Architecture
 
@@ -100,7 +100,7 @@ The reasoning behind each choice is recorded as an ADR ([index](docs/adr/README.
 | authorization-service | Idempotency, row locking under concurrency, outbox under Kafka outage, circuit breaker, review conflicts | `make test-auth` | 59 |
 | fraud-service | Feature math, API, Postgres history, **model quality gate** (retrains from scratch) | `make test-fraud` | 28 |
 | assistant-service | Guardrails against a scripted misbehaving model, tool scope, retrieval, pgvector | `make test-assistant` | 38 |
-| simulator | Dataset realism and determinism | `make test-sim` | 16 |
+| simulator | Dataset realism and determinism | `make test-sim` | 17 |
 | dashboard | Components, BFF input handling (Vitest); review + chat flows in a real browser (Playwright) | `npm test`, `npm run test:e2e` | 26 + 9 |
 | end-to-end | Exactly-once under retries, Kafka outage, fraud-service outage | `make e2e` | 4 |
 
