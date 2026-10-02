@@ -1,0 +1,6 @@
+# Offline training and the model card (not in the API image)
+-r requirements.txt
+pandas==3.0.6
+scikit-learn==1.9.1
+shap==0.52.0
+matplotlib==3.11.2
