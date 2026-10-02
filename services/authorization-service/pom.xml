@@ -139,6 +139,7 @@
 						     Port 9 refuses connections instantly, so tests use the rules fallback unless
 						     they start their own fake fraud-service. -->
 						<cardflow.fraud.url>http://127.0.0.1:9</cardflow.fraud.url>
+						<cardflow.admin.api-key>test-admin-key</cardflow.admin.api-key>
 					</systemPropertyVariables>
 				</configuration>
 			</plugin>

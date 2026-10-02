@@ -44,6 +44,9 @@ springdoc:
     path: /swagger-ui.html
 
 cardflow:
+  admin:
+    # Required for dashboard endpoints; empty = admin endpoints closed
+    api-key: ${ADMIN_API_KEY:}
   fraud:
     url: ${FRAUD_URL:http://localhost:8083}
     # Authorization waits at most ~0.5 s for fraud-service, then falls back to rules
