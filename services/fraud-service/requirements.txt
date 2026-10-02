@@ -5,3 +5,5 @@ xgboost==3.4.1
 numpy==2.5.3
 psycopg[binary]==3.3.6
 psycopg-pool==3.3.3
+# /metrics in Prometheus format
+prometheus-client==0.26.0

@@ -16,10 +16,11 @@ COPY src src
 RUN --mount=type=cache,target=/root/.m2,sharing=locked ./mvnw -B -ntp package -DskipTests
 
 # ---- Runtime stage: JRE only, non-root -----------------------------------
-FROM eclipse-temurin:25-jre-noble
+# Alpine JRE: ~75 MB compressed vs ~180 MB for the Ubuntu one, and fewer OS packages to patch
+FROM eclipse-temurin:25-jre-alpine
 WORKDIR /app
 
-RUN groupadd --system app && useradd --system --gid app --no-create-home app
+RUN addgroup -S app && adduser -S -G app -H app
 COPY --from=build /src/target/authorization-service-*.jar app.jar
 USER app
 

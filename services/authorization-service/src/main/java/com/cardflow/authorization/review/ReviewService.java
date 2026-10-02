@@ -8,6 +8,8 @@ import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import io.micrometer.core.instrument.MeterRegistry;
+
 import com.cardflow.authorization.authorization.Authorization;
 import com.cardflow.authorization.authorization.AuthorizationRepository;
 import com.cardflow.authorization.authorization.AuthorizationStatus;
@@ -34,9 +36,11 @@ public class ReviewService {
     private final ReviewDecisionRepository decisions;
     private final CardAccountRepository cards;
     private final OutboxWriter outbox;
+    private final MeterRegistry metrics;
 
     public ReviewService(AuthorizationRepository authorizations, ReviewDecisionRepository decisions,
-            CardAccountRepository cards, OutboxWriter outbox) {
+            CardAccountRepository cards, OutboxWriter outbox, MeterRegistry metrics) {
+        this.metrics = metrics;
         this.authorizations = authorizations;
         this.decisions = decisions;
         this.cards = cards;
@@ -68,6 +72,7 @@ public class ReviewService {
                     correlationId, payload), card.getId());
         }
         log.info("Review {} {} by {}: {} -> {}", auth.getId(), outcome, analyst, before, auth.getStatus());
+        metrics.counter("cardflow.reviews", "decision", outcome.name()).increment();
         return decision;
     }
 }

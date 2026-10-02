@@ -6,6 +6,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
@@ -30,8 +34,11 @@ public class ResilientFraudScorer {
     private final FraudServiceClient client;
     private final RuleBasedFraudScorer rules;
     private final CircuitBreaker breaker;
+    private final MeterRegistry metrics;
 
-    public ResilientFraudScorer(FraudServiceClient client, RuleBasedFraudScorer rules, FraudProperties props) {
+    public ResilientFraudScorer(FraudServiceClient client, RuleBasedFraudScorer rules, FraudProperties props,
+            MeterRegistry metrics) {
+        this.metrics = metrics;
         this.client = client;
         this.rules = rules;
         this.breaker = CircuitBreaker.of("fraud-service", CircuitBreakerConfig.custom()
@@ -45,17 +52,28 @@ public class ResilientFraudScorer {
                 .build());
         breaker.getEventPublisher().onStateTransition(e ->
                 log.warn("fraud-service circuit breaker: {}", e.getStateTransition()));
+        Gauge.builder("cardflow.fraud.circuit.open", breaker,
+                        b -> b.getState() == CircuitBreaker.State.CLOSED ? 0 : 1)
+                .description("1 while the fraud-service circuit breaker is open or half-open").register(metrics);
     }
 
     public FraudAssessment score(ScoreRequest request) {
+        Timer.Sample sample = Timer.start(metrics);
+        String outcome = "model";
         try {
             return breaker.executeSupplier(() -> client.score(request));
         } catch (CallNotPermittedException e) {
             // Circuit open: don't even try
+            outcome = "circuit_open";
             return rules.score(request.amountMinor(), request.mcc());
         } catch (Exception e) {
+            outcome = "fallback";
             log.warn("fraud-service call failed ({}); using rule-based fallback", e.getClass().getSimpleName());
             return rules.score(request.amountMinor(), request.mcc());
+        } finally {
+            sample.stop(Timer.builder("cardflow.fraud.score")
+                    .description("Time to get a fraud assessment, by how it was produced")
+                    .tag("outcome", outcome).publishPercentileHistogram().register(metrics));
         }
     }
 

@@ -9,6 +9,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import io.micrometer.core.instrument.MeterRegistry;
+
 import com.cardflow.ledger.account.AccountService;
 import com.cardflow.ledger.account.AccountType;
 import com.cardflow.ledger.transaction.Direction;
@@ -34,11 +36,14 @@ public class AuthorizedTransactionPoster {
     private final JdbcTemplate jdbc;
     private final AccountService accounts;
     private final TransactionService transactions;
+    private final MeterRegistry metrics;
 
-    public AuthorizedTransactionPoster(JdbcTemplate jdbc, AccountService accounts, TransactionService transactions) {
+    public AuthorizedTransactionPoster(JdbcTemplate jdbc, AccountService accounts, TransactionService transactions,
+            MeterRegistry metrics) {
         this.jdbc = jdbc;
         this.accounts = accounts;
         this.transactions = transactions;
+        this.metrics = metrics;
     }
 
     /** @return true if posted, false if this event was already applied */
@@ -49,6 +54,7 @@ public class AuthorizedTransactionPoster {
                 event.eventId(), event.eventType());
         if (inserted == 0) {
             log.info("Skipping duplicate event {}", event.eventId());
+            metrics.counter("cardflow.ledger.events", "result", "duplicate").increment();
             return false;
         }
 
@@ -67,6 +73,7 @@ public class AuthorizedTransactionPoster {
         jdbc.update("UPDATE processed_events SET transaction_id = ? WHERE event_id = ?", txn.getId(), event.eventId());
         log.info("Posted event {} as transaction {} ({} {})", event.eventId(), txn.getId(), p.amountMinor(),
                 p.currency());
+        metrics.counter("cardflow.ledger.events", "result", "posted").increment();
         return true;
     }
 }

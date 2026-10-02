@@ -33,7 +33,15 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        # Internal network only (not published in AWS); Prometheus scrapes /actuator/prometheus
+        include: health,info,prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      # Histogram buckets so p95/p99 latency can be computed from Prometheus data
+      percentiles-histogram:
+        http.server.requests: true
   endpoint:
     health:
       probes:

@@ -14,7 +14,8 @@ from typing import Annotated
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from pydantic import BaseModel, Field, StringConstraints
 
 from . import logging_config
@@ -28,6 +29,14 @@ from .settings import Settings
 from .store import PgVectorStore
 
 log = logging.getLogger("assistant.api")
+
+CHATS = Counter("assistant_chats_total", "Chat requests by outcome", ["outcome"])  # answered | refused | guardrail_<reason>
+CHAT_SECONDS = Histogram("assistant_chat_seconds", "End-to-end chat latency",
+                         buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30))
+ROUNDS = Histogram("assistant_llm_rounds", "Model rounds per chat", buckets=(1, 2, 3, 4, 5))
+TOKENS = Counter("assistant_llm_tokens_total", "LLM tokens", ["direction"])
+COST = Counter("assistant_llm_cost_usd_total", "Estimated LLM spend in USD")
+UNAVAILABLE = Counter("assistant_llm_unavailable_total", "Chats that failed because the LLM was unavailable")
 SAFE_ID = re.compile(r"^[A-Za-z0-9-]{1,64}$")
 
 
@@ -97,6 +106,7 @@ def create_app(assistant: Assistant | None = None, app_info: dict | None = None)
     @app.exception_handler(LLMUnavailable)
     async def llm_unavailable(request: Request, exc: LLMUnavailable):
         log.warning("LLM unavailable: %s", exc)
+        UNAVAILABLE.inc()
         return JSONResponse(status_code=503, media_type="application/problem+json",
                             content={"title": "Assistant unavailable", "status": 503,
                                      "detail": "The assistant is temporarily unavailable. Please try again shortly."})
@@ -110,11 +120,21 @@ def create_app(assistant: Assistant | None = None, app_info: dict | None = None)
     @app.post("/chat")
     def chat(req: ChatRequest, request: Request):
         r = request.app.state.assistant.answer(req.card_id, req.message)
+        CHATS.labels("answered" if not r.refused else f"guardrail_{r.guardrail}" if r.guardrail else "refused").inc()
+        CHAT_SECONDS.observe(r.latency_ms / 1000)
+        ROUNDS.observe(r.rounds)
+        TOKENS.labels("input").inc(r.usage.input_tokens)
+        TOKENS.labels("output").inc(r.usage.output_tokens)
+        COST.inc(r.usage.cost_usd)
         return {"answer": r.answer, "citations": r.citations, "toolsUsed": r.tools_used, "refused": r.refused,
                 "guardrail": r.guardrail, "model": r.model, "demoMode": request.app.state.info.get("demoMode", False),
                 "usage": {"inputTokens": r.usage.input_tokens, "outputTokens": r.usage.output_tokens,
                           "costUsd": round(r.usage.cost_usd, 6)},
                 "latencyMs": r.latency_ms}
+
+    @app.get("/metrics", include_in_schema=False)
+    def metrics():
+        return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     @app.get("/health")
     def health(request: Request):
