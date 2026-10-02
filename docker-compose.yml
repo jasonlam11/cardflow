@@ -154,6 +154,29 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  assistant-service:
+    build: ./services/assistant-service
+    image: cardflow/assistant-service:local
+    container_name: cardflow-assistant
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ledger-service:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_NAME: assistant
+      DB_USER: assistant_svc
+      DB_PASSWORD: ${ASSISTANT_DB_PASSWORD:?set in .env}
+      LEDGER_URL: http://ledger-service:8081
+      # auto = Claude if ANTHROPIC_API_KEY is set, otherwise the free demo model
+      ASSISTANT_PROVIDER: ${ASSISTANT_PROVIDER:-auto}
+      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-claude-haiku-4-5}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    ports:
+      - "127.0.0.1:${ASSISTANT_PORT:-8084}:8084"
+    restart: unless-stopped
+
   # The only service meant to face users (and, in AWS, the internet)
   dashboard:
     build: ./dashboard
@@ -167,6 +190,7 @@ services:
     environment:
       AUTHORIZATION_URL: http://authorization-service:8082
       LEDGER_URL: http://ledger-service:8081
+      ASSISTANT_URL: http://assistant-service:8084
       ADMIN_API_KEY: ${ADMIN_API_KEY:?set in .env}
     ports:
       - "127.0.0.1:${DASHBOARD_PORT:-3000}:3000"

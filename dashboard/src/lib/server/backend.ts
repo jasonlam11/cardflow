@@ -9,7 +9,10 @@ import { randomUUID } from "node:crypto";
 
 const AUTHORIZATION_URL = process.env.AUTHORIZATION_URL ?? "http://localhost:8082";
 const LEDGER_URL = process.env.LEDGER_URL ?? "http://localhost:8081";
+const ASSISTANT_URL = process.env.ASSISTANT_URL ?? "http://localhost:8084";
 const TIMEOUT_MS = 5_000;
+// An LLM answer with a few tool calls can take several seconds
+const ASSISTANT_TIMEOUT_MS = 45_000;
 
 export class UpstreamError extends Error {
   constructor(
@@ -20,7 +23,7 @@ export class UpstreamError extends Error {
   }
 }
 
-async function call(base: string, path: string, init: RequestInit & { admin?: boolean } = {}) {
+async function call(base: string, path: string, init: RequestInit & { admin?: boolean; timeoutMs?: number } = {}) {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   headers.set("X-Correlation-Id", randomUUID());
@@ -31,7 +34,7 @@ async function call(base: string, path: string, init: RequestInit & { admin?: bo
   }
   let res: Response;
   try {
-    res = await fetch(base + path, { ...init, headers, cache: "no-store", signal: AbortSignal.timeout(TIMEOUT_MS) });
+    res = await fetch(base + path, { ...init, headers, cache: "no-store", signal: AbortSignal.timeout(init.timeoutMs ?? TIMEOUT_MS) });
   } catch {
     throw new UpstreamError(502, "Backend service unavailable");
   }
@@ -56,6 +59,9 @@ export const authorizationApi = (path: string, init?: RequestInit) =>
 export const authorizationPublicApi = (path: string, init?: RequestInit) => call(AUTHORIZATION_URL, path, init);
 
 export const ledgerApi = (path: string, init?: RequestInit) => call(LEDGER_URL, path, init);
+
+export const assistantApi = (path: string, init?: RequestInit) =>
+  call(ASSISTANT_URL, path, { ...init, timeoutMs: ASSISTANT_TIMEOUT_MS });
 
 /** Turns any thrown error into a JSON response the client can display. */
 export function errorResponse(e: unknown): Response {

@@ -3,7 +3,9 @@
 /** Browser-side calls to this app's /api routes, with responses validated by Zod. */
 import type { z } from "zod";
 import {
+  assistantInfoSchema,
   authorizationPageSchema,
+  chatResponseSchema,
   cardDetailSchema,
   decisionPageSchema,
   reviewDetailSchema,
@@ -49,4 +51,11 @@ export const api = {
     }),
   decisions: (page = 0) => getJson(`/api/decisions?page=${page}`, decisionPageSchema),
   card: (id: string) => getJson(`/api/cards/${id}`, cardDetailSchema),
+  assistantInfo: () => getJson("/api/assistant/info", assistantInfoSchema),
+  chat: (cardId: string, message: string) =>
+    getJson("/api/assistant/chat", chatResponseSchema, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cardId, message }),
+    }),
 };

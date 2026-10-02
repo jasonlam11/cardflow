@@ -32,8 +32,17 @@ public class TransactionService {
     }
 
     /** Validates and records a transaction and all its entries atomically. */
+    /** Merchant context from a card event; null for direct API postings. */
+    public record Merchant(String merchantId, String merchantName, String mcc) {
+    }
+
     @Transactional
     public LedgerTransaction post(PostTransactionRequest request) {
+        return post(request, null);
+    }
+
+    @Transactional
+    public LedgerTransaction post(PostTransactionRequest request, Merchant merchant) {
         Set<UUID> accountIds = request.entries().stream().map(EntryRequest::accountId).collect(Collectors.toSet());
         Map<UUID, Account> referenced = accounts.findAllById(accountIds).stream()
                 .collect(Collectors.toMap(Account::getId, Function.identity()));
@@ -42,6 +51,9 @@ public class TransactionService {
 
         Instant occurredAt = request.occurredAt() != null ? DbTime.truncate(request.occurredAt()) : DbTime.now();
         LedgerTransaction txn = new LedgerTransaction(request.description(), occurredAt);
+        if (merchant != null) {
+            txn.setMerchant(merchant.merchantId(), merchant.merchantName(), merchant.mcc());
+        }
         for (EntryRequest e : request.entries()) {
             txn.addEntry(e.accountId(), e.direction(), e.amountMinor(), request.currency());
         }

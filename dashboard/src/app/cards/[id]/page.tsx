@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 
 import { ErrorBox, Loading } from "@/components/States";
@@ -22,7 +23,10 @@ export default function CardDetail() {
       <div>
         <h1 className="font-mono text-2xl font-semibold">{maskCard(card.last4)}</h1>
         <p className="text-sm text-slate-500">
-          {humanize(card.status)} · opened {formatDateTime(card.createdAt)}
+          {humanize(card.status)} · opened {formatDateTime(card.createdAt)} ·{" "}
+          <Link href={`/assistant?card=${card.id}`} className="underline underline-offset-2">
+            Ask the assistant about this card
+          </Link>
         </p>
       </div>
       <div className="grid gap-4 sm:grid-cols-3">

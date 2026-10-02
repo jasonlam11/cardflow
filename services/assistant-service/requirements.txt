@@ -1,0 +1,11 @@
+# Runtime
+fastapi==0.142.2
+uvicorn==0.54.0
+anthropic==1.11.0
+fastembed==0.8.1
+numpy==2.5.3
+pgvector==0.5.0
+psycopg[binary]==3.3.6
+psycopg-pool==3.3.3
+# Our own HTTP calls to ledger-service (the Anthropic SDK uses its own httpx2 internally)
+httpx==0.28.1

@@ -61,7 +61,8 @@ public class AuthorizedTransactionPoster {
         LedgerTransaction txn = transactions.post(new PostTransactionRequest(
                 p.merchantName() + " (authorization " + p.authorizationId() + ")", p.currency(), event.occurredAt(),
                 List.of(new EntryRequest(cardholder, Direction.DEBIT, p.amountMinor()),
-                        new EntryRequest(merchant, Direction.CREDIT, p.amountMinor()))));
+                        new EntryRequest(merchant, Direction.CREDIT, p.amountMinor()))),
+                new TransactionService.Merchant(p.merchantId(), p.merchantName(), p.mcc()));
 
         jdbc.update("UPDATE processed_events SET transaction_id = ? WHERE event_id = ?", txn.getId(), event.eventId());
         log.info("Posted event {} as transaction {} ({} {})", event.eventId(), txn.getId(), p.amountMinor(),

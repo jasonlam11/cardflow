@@ -2,7 +2,7 @@
 
 A simplified card payments platform built as microservices. A synthetic merchant sends a charge, and the platform **authorizes** it, **scores it for fraud** with explainable reason codes, records it in a **double-entry ledger**, and routes borderline cases to a **human review queue**. An **AI assistant** answers spending and card-benefit questions with grounded, cited answers and guardrails.
 
-> **Status:** Phase 4 (dashboard + human review) in progress. See [PLAN.md](PLAN.md) for the roadmap, [PROGRESS.md](PROGRESS.md) for status, and [docs/NOTES.md](docs/NOTES.md) for how everything works and why.
+> **Status:** Phase 5 (AI assistant) in progress. See [PLAN.md](PLAN.md) for the roadmap, [PROGRESS.md](PROGRESS.md) for status, and [docs/NOTES.md](docs/NOTES.md) for how everything works and why.
 > All data is synthetic. No real card numbers or personal data.
 
 ![Review queue: a flagged charge with its fraud score, SHAP reason bars and approve/reject controls](docs/images/dashboard-review-queue.png)
@@ -46,6 +46,7 @@ make build   # rebuilds service images after code changes
 make simulate ARGS="--cards 20 --charges 500 --rate 20"   # synthetic traffic
 make e2e     # end-to-end tests against the running stack
 make train   # regenerate the dataset and retrain the fraud model (+ model card)
+make eval    # assistant eval with the free demo model (make eval-claude for real Claude: costs money)
 make down    # stops the stack (data is kept)
 ```
 
@@ -57,6 +58,7 @@ make down    # stops the stack (data is kept)
 | ledger-service | `localhost:8081` | API docs at [`/swagger-ui.html`](http://localhost:8081/swagger-ui.html) |
 | authorization-service | `localhost:8082` | API docs at [`/swagger-ui.html`](http://localhost:8082/swagger-ui.html) |
 | fraud-service | `localhost:8083` | API docs at [`/docs`](http://localhost:8083/docs); model info at `/model` |
+| assistant-service | `localhost:8084` | RAG assistant; demo mode without `ANTHROPIC_API_KEY` |
 
 Ports bind to `127.0.0.1` only.
 
@@ -81,6 +83,7 @@ docs/adr/           architecture decision records
 | Fraud model, held-out days ([model card](docs/model-card.md)) | PR-AUC **0.918**; flags 89.8% of fraud; auto-declines at 87.1% precision |
 | Fraud model, live replay (20,041 real authorizations) | 86.3% recall, 87.3% auto-decline precision, 0.15% of legit charges declined |
 | fraud-service down (e2e test) | Authorizations continue on rules fallback; model resumes automatically |
+| Assistant retrieval (36-question eval) | recall@4 100%; every answer cited or replaced by "I don't know" ([results](docs/eval-results.md)) |
 | Analyst approves a flagged charge (Playwright) | Ledger posts it within 0.45–1.4 s; two simultaneous decisions → exactly one wins |
 
 <details><summary>More screenshots</summary>
