@@ -104,7 +104,30 @@ export const reviewResultSchema = z.object({
   decidedAt: z.string(),
 });
 
+export const chatCitationSchema = z.object({ type: z.enum(["doc", "tool"]), id: z.string(), title: z.string() });
+
+export const chatResponseSchema = z.object({
+  answer: z.string(),
+  citations: z.array(chatCitationSchema),
+  toolsUsed: z.array(z.string()),
+  refused: z.boolean(),
+  guardrail: z.string().nullable(),
+  model: z.string(),
+  demoMode: z.boolean(),
+  usage: z.object({ inputTokens: z.number(), outputTokens: z.number(), costUsd: z.number() }),
+  latencyMs: z.number(),
+});
+
+export const assistantInfoSchema = z.object({
+  provider: z.string(),
+  model: z.string(),
+  demoMode: z.boolean(),
+  documents: z.number().optional(),
+  sections: z.number().optional(),
+});
+
 export type Authorization = z.infer<typeof authorizationSchema>;
+export type ChatResponse = z.infer<typeof chatResponseSchema>;
 export type AuthorizationPage = z.infer<typeof authorizationPageSchema>;
 export type ReviewDetail = z.infer<typeof reviewDetailSchema>;
 export type Decision = z.infer<typeof decisionSchema>;

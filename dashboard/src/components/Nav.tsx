@@ -12,6 +12,7 @@ const LINKS = [
   { href: "/transactions", label: "Transactions" },
   { href: "/reviews", label: "Review queue" },
   { href: "/reviews/history", label: "Decisions" },
+  { href: "/assistant", label: "Assistant" },
 ];
 
 export function Nav() {
