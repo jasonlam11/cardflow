@@ -1,4 +1,3 @@
-# Ecosystems for npm get added here when the dashboard is created.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -32,8 +31,19 @@ updates:
       spring:
         patterns: ["org.springframework*", "org.springdoc*"]
   - package-ecosystem: pip
-    directories: ["/simulator", "/tests/e2e"]
+    directories: ["/simulator", "/tests/e2e", "/services/fraud-service"]
     schedule:
       interval: weekly
     commit-message:
       prefix: chore
+  - package-ecosystem: npm
+    directory: /dashboard
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+    groups:
+      next-react:
+        patterns: ["next", "react", "react-dom", "eslint-config-next", "@types/react*"]
+      testing:
+        patterns: ["vitest", "@testing-library/*", "jsdom", "@playwright/test"]
