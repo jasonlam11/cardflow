@@ -1,6 +1,6 @@
 # Progress
 
-## Current phase: 4, Dashboard + human review
+## Current phase: 5, AI assistant
 
 ### Session log
 
@@ -48,11 +48,19 @@
   - Freed disk space after the Mac filled up and Docker crashed (caches + Docker build cache)
   - ADR 0009 (BFF + admin key), ADR 0010 (review transition + audit trail); NOTES §11
 
+- Phase 4 merged (PR #9)
+- **Phase 5** (branch `phase-5-assistant`):
+  - assistant-service (Python 3.14, FastAPI): 8 fictional benefits docs (36 sections), local embeddings (bge-small), pgvector; 4 read-only ledger tools bound to the session card; guardrails (redaction, citation and amount checks, round cap); provider-agnostic LLM layer: Claude via the official SDK (Haiku 4.5 default), DemoLLM when no key
+  - ledger-service V3: merchant + MCC on transactions; spending-by-category and filtered history endpoints
+  - 36-question eval (benefits, account, refuse, injection, PII) with a free demo run in CI and a paid real-model run behind --confirm-cost
+  - Dashboard /assistant chat page with source chips and guardrail notes; Playwright chat tests
+  - ADR 0011 (RAG), ADR 0012 (LLM interface + guardrails); NOTES §12
+
 ### Next
-- [ ] CI green on Phase 4 PR, then merge
-- [ ] Explain-back questions for Phases 2–4 (YOUR TURN)
-- [ ] Phase 5 plan: AI assistant (RAG over benefits docs + read-only ledger tools, guardrails, eval suite)
-- [ ] Free more disk space before Phase 5 (Mac had ~7 GB free)
+- [ ] CI green on Phase 5 PR, then merge
+- [ ] Add an Anthropic API key and run `make eval-claude ARGS=--confirm-cost` for real-model metrics (~$0.50 on Haiku 4.5)
+- [ ] Explain-back questions for Phases 2–5 (YOUR TURN)
+- [ ] Phase 6 plan: load test (k6), structured logs/metrics, ADR wrap-up, README polish, demo GIF
 - [x] PR #1 merged (Phase 0 complete)
 - [x] Java 25.0.4.1 LTS installed (Homebrew, native arm64) and set as default in ~/.zprofile
 
@@ -66,13 +74,17 @@
 - fraud-service image is 596 MB (numpy + xgboost); slim down in Phase 6
 - Analyst identity is self-declared; the admin key authenticates the dashboard, not the person (ADR 0009)
 - Review queue lists the 50 oldest; no search beyond deep links and transaction filters
+- Assistant model-quality metrics not measured yet (no API key); demo-mode numbers measure the pipeline only
+- Haiku 4.5 won't prompt-cache our ~2k-token prefix (needs 4,096+)
+- One Python e2e failure right after a stack restart (passed 3x after); watch for a startup race
+- Disk: ~5.5 GB free; assistant image is 827 MB
 
 ## Metrics (real, measured numbers only)
 
 | Metric | Value | Measured |
 |---|---|---|
-| Services | 4 (ledger, authorization, fraud, dashboard) + simulator | 2026-10-02 |
-| Total tests | 175: ledger 46, authorization 55, fraud 27, simulator 16, dashboard unit 22, Playwright 6, e2e 4 (incl. 1 quality gate) | 2026-10-02 |
+| Services | 5 (ledger, authorization, fraud, assistant, dashboard) + simulator | 2026-10-02 |
+| Total tests | 222: ledger 50, authorization 55, fraud 27, assistant 37, simulator 16, dashboard unit 26, Playwright 9, e2e 4 | 2026-10-02 |
 | p95 authorization latency | – (single requests ~15 ms incl. fraud call ~5 ms; proper load test in Phase 6) | 2026-10-02 |
 | Throughput (req/s) | – (50/s simulated without errors; real load test in Phase 6) | |
 | Duplicate postings under retry/failure tests | **0** (1,000-charge sim with 44 retries: 926 approved = 926 posted; e2e Kafka outage: 0 lost) | 2026-10-01 |
@@ -81,6 +93,6 @@
 | Fraud model, live replay through the stack | 20,041 authorizations in 108.5 s; flagged 69.9% precision / 86.3% recall; auto-decline 87.3% precision; 0.15% of legit charges declined | 2026-10-02 |
 | Human review: Approve click -> ledger posted | 0.45-1.4 s (Playwright, 4 runs) | 2026-10-02 |
 | Fraud scoring latency | in-process p50 0.39 ms / p95 0.46 ms; HTTP call from authorization ~5 ms (was ~47 ms before the Nagle fix) | 2026-10-02 |
-| Assistant accuracy / refusal / citation / injection blocked | – | |
+| Assistant eval (36 questions) | Demo mode: retrieval recall@4 100%, citation rate 100%, injection/PII resistance 100%, $0. Real-model metrics pending an API key | 2026-10-02 |
 | Deploy time push → live | – | |
 | Monthly AWS cost | – | |

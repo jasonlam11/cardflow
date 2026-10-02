@@ -21,6 +21,7 @@ A running guide to how CardFlow is built and **why**. It's updated as each phase
 9. [Authorization and events (Phase 2)](#9-authorization-and-events-phase-2)
 10. [Fraud scoring (Phase 3)](#10-fraud-scoring-phase-3)
 11. [Dashboard and human review (Phase 4)](#11-dashboard-and-human-review-phase-4)
+12. [AI assistant with guardrails (Phase 5)](#12-ai-assistant-with-guardrails-phase-5)
 
 ---
 
@@ -210,6 +211,16 @@ Short version of every decision, newest at the bottom. The big ones also get a f
 | 50 | Zod validation of every BFF response in the browser | API drift fails loudly instead of rendering wrong data | Trust the types | – |
 | 51 | Client-rendered pages calling `/api` (no Cache Components) | Live data; nothing should be cached or prerendered | Server Components with `use cache` | – |
 | 52 | System font stack, no build-time Google Fonts | Builds don't depend on an external service | `next/font/google` | – |
+| 53 | Chunk benefits docs by section; cite as `doc#section` | One topic per chunk; meaningful citations | Fixed-size token windows | [0011](adr/0011-rag-design.md) |
+| 54 | Local embeddings (fastembed, bge-small), baked into the image | Free, offline, deterministic, testable in CI | Embedding API (Voyage) | [0011](adr/0011-rag-design.md) |
+| 55 | pgvector in the assistant's own DB, HNSW cosine index | Reuses Postgres; no extra service | Qdrant / Pinecone | [0011](adr/0011-rag-design.md) |
+| 56 | Loose retrieval cutoff; refusals decided by model + citation guardrail | Measured: answerable vs unanswerable similarity bands overlap | Strict threshold | [0011](adr/0011-rag-design.md) |
+| 57 | Provider-agnostic `LLMClient`; Claude via the official SDK; demo + scripted fakes | Swap providers (Bedrock in Phase 7); run free without a key; test misbehaviour | Calling the SDK directly everywhere | [0012](adr/0012-llm-interface-and-guardrails.md) |
+| 58 | Default model Claude Haiku 4.5 | Owner's choice (lowest cost); one env var to change, eval to compare | Opus 5.5 / Sonnet 5.5 | [0012](adr/0012-llm-interface-and-guardrails.md) |
+| 59 | Guardrails in code: redaction, citation check, amount check, round cap | Don't rely on prompt wording for safety properties | Prompt-only rules | [0012](adr/0012-llm-interface-and-guardrails.md) |
+| 60 | Only read-only tools; card id bound from the session | Model can't move money or read other accounts, whatever it's told | Tools with a card parameter | [0012](adr/0012-llm-interface-and-guardrails.md) |
+| 61 | Real-model eval on demand only, behind `--confirm-cost` | Never spend money by accident; CI stays free | Eval on every push | [0012](adr/0012-llm-interface-and-guardrails.md) |
+| 62 | Ledger stores merchant + MCC (V3) | Spending-by-category belongs to the system of record | Ask authorization-service | – |
 
 ---
 
@@ -287,6 +298,18 @@ Plain-English definitions, added as each concept shows up.
 | **409 Conflict** | HTTP status for "valid request, but it conflicts with the current state" | Second analyst's decision |
 | **Playwright** | Drives a real browser for end-to-end tests | `dashboard/tests/e2e` |
 | **Fail closed** | When something's missing or wrong, deny rather than allow | Admin key unset → admin endpoints closed |
+| **RAG (retrieval-augmented generation)** | Find relevant passages first, then have the model answer only from them | Assistant |
+| **Embedding** | A vector of numbers representing a text's meaning; similar texts get similar vectors | Retrieval |
+| **Cosine similarity** | How closely two vectors point the same way (1 = same meaning) | Search scores |
+| **HNSW** | A graph index that finds nearest vectors fast without comparing against all of them | pgvector index |
+| **Chunk** | A piece of a document indexed on its own; here, one section | Knowledge base |
+| **Recall@k** | Share of questions whose right passage is among the top k results | Retrieval metric |
+| **Tool use / function calling** | The model asks your code to run a named function with JSON arguments, then reads the result | Ledger tools |
+| **Grounding** | Every claim traceable to a provided source | Citation guardrail |
+| **Hallucination** | A fluent claim with no basis in the sources | What the amount check catches |
+| **Prompt injection** | Text (from a user or from data) that tries to override the system's instructions | Eval category |
+| **Prompt caching** | The API reuses an unchanged prompt prefix across requests, cheaper and faster | Stable system prompt |
+| **Eval** | A fixed question set with automatic scoring, run before and after changes | `evals/` |
 
 ---
 
@@ -609,3 +632,56 @@ Reject is the same, except the status becomes `DECLINED` / `ANALYST_REJECTED`, n
 6. **Reasons on low-risk charges were misleading.** The model returns its top positive SHAP contributions for every charge; on a low-risk charge those didn't make it risky. The table now shows reasons only for flagged charges. Found by looking at the screenshot.
 7. **Another app on port 3000.** A different project's dev server was listening on IPv6 `::1:3000`, so `localhost:3000` went there, while Docker listens on IPv4 `127.0.0.1:3000`. Tests use `127.0.0.1`. If the dashboard looks wrong, check `lsof -iTCP:3000 -sTCP:LISTEN`.
 8. **The Mac's disk filled up** (2 GB free) and Docker Desktop went read-only, then wouldn't start. Cleared download caches (~5 GB) and Docker build cache (~4 GB). Lesson: image rebuilds accumulate build cache; prune it periodically.
+
+---
+
+## 12. AI assistant with guardrails (Phase 5)
+
+### What one question goes through
+```
+dashboard /assistant ──▶ BFF /api/assistant/chat (validates card id, length) ──▶ assistant-service POST /chat
+   1. redact()            card numbers (Luhn), SSNs, emails, phones → [REDACTED_*]
+   2. retrieve()          top-4 sections from pgvector (bge-small embeddings, cosine)
+   3. tool loop (≤ 5)     model ⇄ read-only tools bound to THIS card
+                            get_balance · spending_by_category · largest_transactions · recent_transactions
+                            (tool output is redacted too; bad inputs come back as tool errors)
+   4. guardrails          cited?  citations provided in THIS request?  every $ amount in a source?
+                            no → "I don't know…" (and the reason is shown)
+   5. response            answer · sources · tools used · tokens · cost · latency
+```
+
+### The model, and running without a key
+- `LLMClient` is a tiny provider-neutral interface. **Claude** goes through the official `anthropic` SDK (default **Claude Haiku 4.5**, `ASSISTANT_MODEL` to change).
+- With no credentials the service runs **`DemoLLM`**: deterministic rules that call tools and cite sources. Retrieval, tools and guardrails are real; the answers are not a model's. The API and UI both say "demo mode".
+- **Haiku 4.5 and caching:** Haiku only caches prompt prefixes of 4,096+ tokens; ours is about 2k, so cache reads will be zero on Haiku (bigger models cache from 512–1,024 tokens). The eval reports cache reads so this is visible, not assumed.
+
+### Eval suite (36 questions)
+| Category | n | Passes when |
+|---|---|---|
+| Benefits | 12 | Not refused, required fact present (e.g. "$500"), expected section retrieved |
+| Account | 8 | Exact amount from the fixture ledger (e.g. "$659.00"), right tool used |
+| Should refuse | 8 | "I don't know" / "I can't" (credit score, investing, rental-car cover, move money, someone else's account) |
+| Injection | 7 | No forbidden output (system prompt, "$50,000" fake coverage, "$1,000,000" planted in a merchant name) |
+| PII | 1 | Answers, and never echoes the card number |
+
+Run it: `make eval` (free, demo) or `make eval-claude` (needs a key **and** confirms the cost first).
+
+**Results so far (demo mode, no API key):** retrieval recall@4 **100%** (every benefits question's section was retrieved), citation rate **100%**, injection/PII resistance **100%**, cost **$0**. Demo-mode accuracy and refusal numbers (25/36 passed) describe the rule-based stand-in, not a model: e.g. it answers "what's my credit score?" from the nearest section instead of refusing, which is exactly the judgment a real model has to supply. **Real-model results:** not yet measured (no API key); `make eval-claude ARGS=--confirm-cost` produces them (estimate ~$0.50 per run on Haiku 4.5).
+
+### Proof (automated)
+| Claim | Test |
+|---|---|
+| Chunking, stable ids, re-index only on change | `test_knowledge.py` |
+| Redaction, citation parsing/validation, amount grounding | `test_guardrails.py` |
+| No money-moving tool; no card parameter; other cards see nothing; input validation | `test_tools.py` |
+| Uncited / wrongly cited / made-up-amount answers are replaced; round cap; refusal stop reason; PII never sent | `test_chat.py` (scripted misbehaving model) |
+| API validation, clean 503 on LLM outage | `test_api.py` |
+| pgvector search and corpus replacement | `test_store_postgres.py` (Testcontainers) |
+| Retrieval recall@4 = 100% | CI demo eval (`--min-recall 1.0`) |
+| Browser: balance answer from the real ledger with a tool source; benefits answer with a doc source | Playwright `assistant.spec.ts` |
+
+### Gotchas we hit
+1. **A regex ate a space.** `(\d[ -]?){13,19}` matched the space after a card number, so redaction glued words together. Patterns that consume separators should start and end on the thing itself.
+2. **Python name shadowing.** `create_app(info=...)` later defined a route function also called `info`, so the startup code stored the function instead of the dict.
+3. **Similarity is not answerability** (measured; see ADR 0011).
+4. **Wrong expected totals in my own tests** ($1,050.89 vs the actual $989.89). Compute expected values from the fixture, don't type them.
