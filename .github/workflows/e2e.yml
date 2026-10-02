@@ -7,6 +7,7 @@ on:
     paths:
       - services/**
       - simulator/**
+      - dashboard/**
       - tests/e2e/**
       - infra/**
       - docker-compose.yml
@@ -48,6 +49,26 @@ jobs:
         run: |
           pip install -r requirements.txt
           pytest -v
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: dashboard/.nvmrc
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Dashboard browser tests (Playwright)
+        working-directory: dashboard
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: dashboard/playwright-report
 
       - name: Simulator smoke run (200 charges)
         run: docker compose --profile sim run --rm --build simulator --cards 10 --charges 200 --rate 50

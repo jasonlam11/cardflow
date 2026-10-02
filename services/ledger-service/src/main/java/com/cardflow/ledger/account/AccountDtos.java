@@ -20,10 +20,12 @@ public final class AccountDtos {
             @NotNull @Pattern(regexp = "^[A-Z]{3}$", message = "must be a 3-letter ISO 4217 code, e.g. USD") String currency) {
     }
 
-    public record AccountResponse(UUID id, String name, AccountType type, String currency, Instant createdAt) {
+    public record AccountResponse(UUID id, String name, AccountType type, String currency, String externalRef,
+            Instant createdAt) {
 
         static AccountResponse from(Account a) {
-            return new AccountResponse(a.getId(), a.getName(), a.getType(), a.getCurrency(), a.getCreatedAt());
+            return new AccountResponse(a.getId(), a.getName(), a.getType(), a.getCurrency(), a.getExternalRef(),
+                    a.getCreatedAt());
         }
     }
 }

@@ -30,6 +30,12 @@ public class AccountService {
                 .orElseThrow(() -> new NotFoundException("Account " + id + " not found"));
     }
 
+    @Transactional(readOnly = true)
+    public Account getByExternalRef(String externalRef) {
+        return accounts.findByExternalRef(externalRef)
+                .orElseThrow(() -> new NotFoundException("No account linked to " + externalRef));
+    }
+
     /**
      * Returns the account linked to externalRef, creating it if needed.
      * ON CONFLICT makes this safe if two consumers create the same account at once.

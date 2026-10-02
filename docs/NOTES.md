@@ -20,6 +20,7 @@ A running guide to how CardFlow is built and **why**. It's updated as each phase
 8. [ledger-service (Phase 1)](#8-ledger-service-phase-1)
 9. [Authorization and events (Phase 2)](#9-authorization-and-events-phase-2)
 10. [Fraud scoring (Phase 3)](#10-fraud-scoring-phase-3)
+11. [Dashboard and human review (Phase 4)](#11-dashboard-and-human-review-phase-4)
 
 ---
 
@@ -201,6 +202,14 @@ Short version of every decision, newest at the bottom. The big ones also get a f
 | 42 | Optional `occurredAt` on charges + replay mode | Realistic timing for features; lets us measure the model through the live system | Server time only | – |
 | 43 | fraud-service: one uvicorn process per container | Measured: `--workers` mode added a ~40 ms Nagle stall per request | Multiple workers per container | – |
 | 44 | `xgboost-cpu` in images and CI | ~6 MB instead of ~250 MB of GPU libraries we don't use | Full `xgboost` | – |
+| 45 | Dashboard is a backend-for-frontend; the browser never calls services directly | One public entry point; secrets stay server-side | Browser → services with CORS | [0009](adr/0009-dashboard-bff-and-admin-key.md) |
+| 46 | Admin API key for dashboard endpoints (not user login) | Proves calls come from the dashboard; login is a stretch goal | OIDC/JWT now; no auth | [0009](adr/0009-dashboard-bff-and-admin-key.md) |
+| 47 | Review = one guarded transition, DB trigger + row lock + 409 | Two analysts can't both decide; history can't be edited | Optimistic locking; app-only checks | [0010](adr/0010-human-review-audit-trail.md) |
+| 48 | Approval writes the ledger event in the same transaction | Approved ⇔ posted, never one without the other | Separate step after approval | [0010](adr/0010-human-review-audit-trail.md) |
+| 49 | Polling every 3 s (TanStack Query) instead of WebSockets/SSE | Simple, stateless, good enough for an ops screen | Server-sent events; WebSockets | – |
+| 50 | Zod validation of every BFF response in the browser | API drift fails loudly instead of rendering wrong data | Trust the types | – |
+| 51 | Client-rendered pages calling `/api` (no Cache Components) | Live data; nothing should be cached or prerendered | Server Components with `use cache` | – |
+| 52 | System font stack, no build-time Google Fonts | Builds don't depend on an external service | `next/font/google` | – |
 
 ---
 
@@ -269,6 +278,15 @@ Plain-English definitions, added as each concept shows up.
 | **Fallback** | What to do when the dependency can't answer | Rule-based scorer |
 | **Cascading failure** | One slow service making its callers slow, and so on up the chain | What the breaker prevents |
 | **Nagle's algorithm / delayed ACK** | TCP batching tricks that, combined, can add ~40 ms to small request/response exchanges | The fraud latency bug |
+| **Backend-for-frontend (BFF)** | A server layer owned by the UI that calls backend services on the browser's behalf | Dashboard `/api` routes |
+| **Route handler** | A Next.js server endpoint (`app/api/.../route.ts`) | The BFF |
+| **Server vs client component** | React components that run only on the server vs. ship JavaScript to the browser | Pages are client components |
+| **TanStack Query** | Library that fetches, caches, polls and refetches server data in React | Every page |
+| **Zod** | Runtime schema validation for TypeScript | Response checks |
+| **Optimistic vs pessimistic locking** | Detect conflicts at write time (version check) vs. prevent them by locking first | Review uses pessimistic (`FOR UPDATE`) |
+| **409 Conflict** | HTTP status for "valid request, but it conflicts with the current state" | Second analyst's decision |
+| **Playwright** | Drives a real browser for end-to-end tests | `dashboard/tests/e2e` |
+| **Fail closed** | When something's missing or wrong, deny rather than allow | Admin key unset → admin endpoints closed |
 
 ---
 
@@ -304,6 +322,9 @@ docker exec -it cardflow-postgres psql -U ledger_svc -d ledger
 | fraud-service won't start: password authentication failed for `fraud_svc` | Your Postgres volume predates the `fraud` database | `make reset-db` (local data only) |
 | Every response has `"scoredBy": "RULES_FALLBACK"` | fraud-service down or the circuit is open | `make logs s=fraud-service`; the circuit retries after 10 s |
 | Retraining changed nothing | Training is deterministic for a given dataset and seed | Change the data/seed or parameters on purpose |
+| Dashboard shows "Missing or invalid admin API key" | `ADMIN_API_KEY` differs (or is missing) between dashboard and authorization-service | Set it once in `.env`, then `docker compose up -d` |
+| Docker Desktop "unable to start", or `EROFS: read-only file system` in a build | The Mac's disk is full, so Docker's disk image can't grow | Free disk space; `docker builder prune`; restart Docker Desktop |
+| `npm` crashes with `reading 'edgesOut'` | Old npm (Node 20) hitting a peer-dependency conflict | Use Node 24 (`nvm use` in `dashboard/`) |
 
 ---
 
@@ -525,3 +546,66 @@ Live numbers track offline within a few points, which is the evidence there's no
 - Cold start: new cards have no history-based signal.
 - fraud-service's `card_activity` grows forever; production would expire rows older than the 30-day window.
 - The fallback rules are duplicated in Java (serving) and Python (measurement); a shared spec or test fixture would keep them in sync.
+
+---
+
+## 11. Dashboard and human review (Phase 4)
+
+### How the pieces connect
+```
+browser ──▶ dashboard :3000 (Next.js)
+              pages (client components, poll every 3 s)
+                 │  fetch /api/...           ← Zod-validates every response
+                 ▼
+              route handlers (server only)   ← adds X-Admin-Api-Key, whitelists filters/ids
+                 ├──▶ authorization-service  /authorizations, /reviews, /stats, /cards
+                 └──▶ ledger-service         /accounts?externalRef=..., /balance
+```
+The admin key is a server env var, so it never reaches the browser (verified: 0 occurrences in the client bundles).
+
+### What happens when an analyst clicks Approve
+```
+POST /api/reviews/{id}/decision  {decision, analyst, note}
+  → POST /authorizations/{id}/review   (authorization-service, one DB transaction)
+       SELECT ... FOR UPDATE                   lock the authorization
+       still PENDING_REVIEW?  no → 409         another analyst got there first
+       status = APPROVED                       DB trigger allows only this transition
+       INSERT review_decisions                 append-only audit row
+       INSERT outbox_events                    transaction.authorized
+     COMMIT
+  → outbox relay → Kafka → ledger consumer → DEBIT card / CREDIT merchant
+```
+Reject is the same, except the status becomes `DECLINED` / `ANALYST_REJECTED`, no event is written, and the held credit is released (available credit is computed from approved and pending charges only).
+
+### Pages
+| Page | Shows |
+|---|---|
+| Overview | 24h counts by status and decline reason, review queue size and oldest item, a warning if the rules fallback was used, live transactions |
+| Transactions | Filter by status and risk band, paging; cards masked to the last 4 digits |
+| Review queue | Oldest first; amount, merchant, category, location or online, score, band, model version, top reasons as bars sized by SHAP contribution, the card's other recent charges; Approve or Reject (note required) |
+| Decisions | The audit trail: who, what, when, note |
+| Card | Limit, available credit (after holds), ledger balance, recent authorizations |
+
+### Proof (automated)
+| Claim | Test |
+|---|---|
+| Approve → `APPROVED`, outbox event, decision row | `ReviewApiTest` |
+| Reject → `DECLINED`, credit released, no event | `ReviewApiTest` |
+| Two analysts at once → one 200, one 409, one decision row | `ReviewApiTest` |
+| DB refuses any other change or delete | `ReviewApiTest` (raw SQL) |
+| Admin endpoints need the key; merchant endpoints don't | `ReviewApiTest` |
+| BFF whitelists filters, adds the key server-side, fails closed without it | `dashboard/tests/unit/bff.test.ts` |
+| Review panel validation, request body, conflict message | `ReviewPanel.test.tsx` |
+| Browser: flagged charge → approve → **ledger posts it**; reject → credit released; both in audit trail | Playwright `review.spec.ts` |
+
+**Measured** (Playwright, real browser against the compose stack): all 6 browser tests pass in ~9 s. From the analyst clicking **Approve** to the ledger showing the posted balance took **0.45–1.4 s** across four runs (the outbox relay polls every 500 ms, so most of that is the relay interval plus Kafka delivery).
+
+### Gotchas we hit
+1. **Next.js 16 has new APIs.** The scaffold ships `AGENTS.md` warning about this; route types like `RouteContext` and `LayoutProps` are generated by `next typegen`, so `npm run typecheck` runs it first.
+2. **vitest 5 needs Node ≥ 22.12**, and old npm crashed (`edgesOut`) instead of reporting the peer conflict. Fix: Node 24 everywhere (`.nvmrc`, CI, Docker).
+3. **React 19 lint: no `setState` inside `useEffect`** to read `localStorage`. External state belongs in `useSyncExternalStore`.
+4. **Testing Library cleanup** only runs automatically with vitest globals; added a setup file.
+5. **Long queue, missing item.** The queue lists the 50 oldest charges, so after a replay left 100+ pending, a new charge wasn't on screen. Fix: deep links (`/reviews?id=…`) and links from the transactions table. Found by the Playwright test.
+6. **Reasons on low-risk charges were misleading.** The model returns its top positive SHAP contributions for every charge; on a low-risk charge those didn't make it risky. The table now shows reasons only for flagged charges. Found by looking at the screenshot.
+7. **Another app on port 3000.** A different project's dev server was listening on IPv6 `::1:3000`, so `localhost:3000` went there, while Docker listens on IPv4 `127.0.0.1:3000`. Tests use `127.0.0.1`. If the dashboard looks wrong, check `lsof -iTCP:3000 -sTCP:LISTEN`.
+8. **The Mac's disk filled up** (2 GB free) and Docker Desktop went read-only, then wouldn't start. Cleared download caches (~5 GB) and Docker build cache (~4 GB). Lesson: image rebuilds accumulate build cache; prune it periodically.

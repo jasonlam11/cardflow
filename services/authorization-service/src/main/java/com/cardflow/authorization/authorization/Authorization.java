@@ -56,12 +56,13 @@ public class Authorization implements Persistable<UUID> {
     @Column(nullable = false, length = 3, updatable = false)
     private String currency;
 
+    /** Changes only through {@link #resolveReview}; a DB trigger enforces the same rule. */
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 16, updatable = false)
+    @Column(nullable = false, length = 16)
     private AuthorizationStatus status;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "decline_reason", length = 40, updatable = false)
+    @Column(name = "decline_reason", length = 40)
     private DeclineReason declineReason;
 
     @Column(name = "correlation_id", length = 64, updatable = false)
@@ -143,6 +144,15 @@ public class Authorization implements Persistable<UUID> {
         this.declineReason = decision.reason();
         this.correlationId = correlationId;
         this.createdAt = DbTime.now();
+    }
+
+    /** The single allowed state change: a human resolves a pending review. */
+    public void resolveReview(boolean approve) {
+        if (status != AuthorizationStatus.PENDING_REVIEW) {
+            throw new IllegalStateException("Authorization " + id + " is " + status + ", not PENDING_REVIEW");
+        }
+        this.status = approve ? AuthorizationStatus.APPROVED : AuthorizationStatus.DECLINED;
+        this.declineReason = approve ? null : DeclineReason.ANALYST_REJECTED;
     }
 
     @Override

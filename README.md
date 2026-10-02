@@ -2,8 +2,10 @@
 
 A simplified card payments platform built as microservices. A synthetic merchant sends a charge, and the platform **authorizes** it, **scores it for fraud** with explainable reason codes, records it in a **double-entry ledger**, and routes borderline cases to a **human review queue**. An **AI assistant** answers spending and card-benefit questions with grounded, cited answers and guardrails.
 
-> **Status:** Phase 3 (fraud scoring) in progress. See [PLAN.md](PLAN.md) for the roadmap, [PROGRESS.md](PROGRESS.md) for status, and [docs/NOTES.md](docs/NOTES.md) for how everything works and why.
+> **Status:** Phase 4 (dashboard + human review) in progress. See [PLAN.md](PLAN.md) for the roadmap, [PROGRESS.md](PROGRESS.md) for status, and [docs/NOTES.md](docs/NOTES.md) for how everything works and why.
 > All data is synthetic. No real card numbers or personal data.
+
+![Review queue: a flagged charge with its fraud score, SHAP reason bars and approve/reject controls](docs/images/dashboard-review-queue.png)
 
 ## Architecture
 
@@ -49,6 +51,7 @@ make down    # stops the stack (data is kept)
 
 | Component | Host address | Notes |
 |---|---|---|
+| **dashboard** | **[127.0.0.1:3000](http://127.0.0.1:3000)** | Ops UI: transactions, review queue, decisions |
 | PostgreSQL 18 + pgvector | `localhost:5432` | One database and one login per service |
 | Kafka 4.3 (KRaft) | `localhost:9092` | Containers use `kafka:29092` |
 | ledger-service | `localhost:8081` | API docs at [`/swagger-ui.html`](http://localhost:8081/swagger-ui.html) |
@@ -78,6 +81,13 @@ docs/adr/           architecture decision records
 | Fraud model, held-out days ([model card](docs/model-card.md)) | PR-AUC **0.918**; flags 89.8% of fraud; auto-declines at 87.1% precision |
 | Fraud model, live replay (20,041 real authorizations) | 86.3% recall, 87.3% auto-decline precision, 0.15% of legit charges declined |
 | fraud-service down (e2e test) | Authorizations continue on rules fallback; model resumes automatically |
+| Analyst approves a flagged charge (Playwright) | Ledger posts it within 0.45–1.4 s; two simultaneous decisions → exactly one wins |
+
+<details><summary>More screenshots</summary>
+
+![Overview](docs/images/dashboard-overview.png)
+![Transactions](docs/images/dashboard-transactions.png)
+</details>
 
 ## Design decisions
 

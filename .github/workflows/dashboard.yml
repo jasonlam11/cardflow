@@ -1,0 +1,36 @@
+name: dashboard
+
+on:
+  pull_request:
+    paths:
+      - dashboard/**
+      - .github/workflows/dashboard.yml
+  push:
+    branches: [main]
+    paths:
+      - dashboard/**
+      - .github/workflows/dashboard.yml
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Lint, typecheck, unit tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: dashboard/.nvmrc
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
