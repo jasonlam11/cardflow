@@ -22,6 +22,7 @@ A running guide to how CardFlow is built and **why**. It's updated as each phase
 10. [Fraud scoring (Phase 3)](#10-fraud-scoring-phase-3)
 11. [Dashboard and human review (Phase 4)](#11-dashboard-and-human-review-phase-4)
 12. [AI assistant with guardrails (Phase 5)](#12-ai-assistant-with-guardrails-phase-5)
+13. [Performance, observability and polish (Phase 6)](#13-performance-observability-and-polish-phase-6)
 
 ---
 
@@ -221,6 +222,14 @@ Short version of every decision, newest at the bottom. The big ones also get a f
 | 60 | Only read-only tools; card id bound from the session | Model can't move money or read other accounts, whatever it's told | Tools with a card parameter | [0012](adr/0012-llm-interface-and-guardrails.md) |
 | 61 | Real-model eval on demand only, behind `--confirm-cost` | Never spend money by accident; CI stays free | Eval on every push | [0012](adr/0012-llm-interface-and-guardrails.md) |
 | 62 | Ledger stores merchant + MCC (V3) | Spending-by-category belongs to the system of record | Ask authorization-service | – |
+| 63 | Load tests with k6, constant arrival rate, plus a DB pipeline report | Measures what users and the ledger actually see; can't hide slowness | JMeter; Locust; HTTP-only metrics | – |
+| 64 | Outbox relay drains full batches (≤ 50 per tick), 500-row batches | Measured cap of 200 events/s; drained backlog at 600 req/s | Shorter poll interval; Debezium CDC | [0005](adr/0005-transactional-outbox.md) |
+| 65 | Ledger consumer `concurrency: 3` (one per partition) | Ledger was 5.5 s behind; per-card order preserved by key | More partitions; batch listener | – |
+| 66 | fraud-service: 3 uvicorn workers on httptools + uvloop (**revises #43**) | httptools sets TCP_NODELAY, so no Nagle stall (0.5 ms median); 100% ML-scored at 200 req/s | One process; a compiled model server | – |
+| 67 | Prometheus-format metrics + ECS JSON logs; no Grafana yet | Standard, portable; dashboards come with deployment | OpenTelemetry tracing now; Grafana in Compose | [0013](adr/0013-observability.md) |
+| 68 | Alpine JRE base images | 611/619 → 469 MB; less to scan and ship | jlink custom runtime; distroless | – |
+| 69 | npm audit + pip-audit on PRs, Trivy on main/weekly | Fast checks where they block; image scans where images exist | Trivy on every PR (slow builds) | – |
+| 70 | `make demo` one-command populated stack | A stranger sees real flagged reviews in minutes | Committed DB snapshot | – |
 
 ---
 
@@ -310,6 +319,17 @@ Plain-English definitions, added as each concept shows up.
 | **Prompt injection** | Text (from a user or from data) that tries to override the system's instructions | Eval category |
 | **Prompt caching** | The API reuses an unchanged prompt prefix across requests, cheaper and faster | Stable system prompt |
 | **Eval** | A fixed question set with automatic scoring, run before and after changes | `evals/` |
+| **p50 / p95 / p99** | The latency that 50% / 95% / 99% of requests beat | Load test results |
+| **Constant arrival rate** | Send N requests/s regardless of response time, so a slow system can't reduce its own load | `perf/steady.js` |
+| **Coordinated omission** | The measurement mistake where a slowing system makes the load generator send less, hiding the slowness | Why we use arrival rate |
+| **Saturation** | A resource is fully busy, so queues and latency grow | fraud-service above ~200 req/s |
+| **Breakpoint test** | Ramp load until a threshold breaks to find the limit | `perf/breakpoint.js` |
+| **Counter / gauge / histogram** | Metric types: only-up count / current value / distribution of values | Prometheus metrics |
+| **Cardinality** | How many distinct label combinations a metric has; ids as labels blow it up | Metric label rules |
+| **Scrape** | Prometheus pulling `/metrics` on an interval | Observability |
+| **Structured logging** | Logs as JSON fields instead of free text, so they can be searched and filtered | ECS logs |
+| **CVE** | A publicly catalogued security vulnerability in a package | Trivy, pip-audit |
+| **Cold start / warm-up** | First requests are slow while models and caches load; warm-up does that work at startup | fraud + assistant |
 
 ---
 
@@ -348,6 +368,10 @@ docker exec -it cardflow-postgres psql -U ledger_svc -d ledger
 | Dashboard shows "Missing or invalid admin API key" | `ADMIN_API_KEY` differs (or is missing) between dashboard and authorization-service | Set it once in `.env`, then `docker compose up -d` |
 | Docker Desktop "unable to start", or `EROFS: read-only file system` in a build | The Mac's disk is full, so Docker's disk image can't grow | Free disk space; `docker builder prune`; restart Docker Desktop |
 | `npm` crashes with `reading 'edgesOut'` | Old npm (Node 20) hitting a peer-dependency conflict | Use Node 24 (`nvm use` in `dashboard/`) |
+| `make perf` fails its thresholds right after `make up` | Cold JVMs and fraud workers | Let it run ~30 s or run once to warm up, then measure |
+| Every authorization `RULES_FALLBACK` under heavy load | fraud-service saturated (~200 req/s on a laptop) | Expected; see `cardflow_authorizations_total{scored_by=...}` |
+| `make demo` takes many minutes the first time | Building 6 images from scratch | Later runs reuse the build cache (~1 min) |
+| Review queue empty after `make up` | No traffic yet | `make demo` (or `make simulate`) |
 
 ---
 
@@ -685,3 +709,52 @@ Run it: `make eval` (free, demo) or `make eval-claude` (needs a key **and** conf
 2. **Python name shadowing.** `create_app(info=...)` later defined a route function also called `info`, so the startup code stored the function instead of the dict.
 3. **Similarity is not answerability** (measured; see ADR 0011).
 4. **Wrong expected totals in my own tests** ($1,050.89 vs the actual $989.89). Compute expected values from the fixture, don't type them.
+
+---
+
+## 13. Performance, observability and polish (Phase 6)
+
+### What "fast" means here, and how we measured it
+- **Load tests with k6.** `perf/steady.js` uses a **constant arrival rate**: k6 starts N requests per second no matter how slowly the system responds. (A fixed number of users each waiting for their reply would quietly send *less* traffic as the system slowed down, which hides problems. This is called *coordinated omission*.)
+- **Realistic traffic, not a hammer on one card:** 500 cards, each card's charges spaced 6 hours apart, so the fraud model sees normal spending. 10% of requests are **retried with the same idempotency key** and must return the identical response.
+- **Measure the whole pipeline.** `perf/report.py` queries both databases afterwards: outbox publish delay, **approval → ledger** delay, events left unpublished, and duplicate postings. HTTP latency alone said everything was fine while events were a minute behind.
+- **Percentiles, not averages.** p95 = 95% of requests were faster than this. The average hides the slow tail that real users feel.
+
+Headline (one M2 laptop, all services sharing 8 CPUs): **200 req/s for 2 min: p50 4.4 ms, p95 28.9 ms, 0 errors, 0 duplicates, approval → ledger p95 509 ms.** Full tables: [performance.md](performance.md).
+
+### Three bottlenecks the measurements found
+| What we saw | Why | Fix |
+|---|---|---|
+| At 600 req/s, 24,490 events stuck in the outbox; ledger 57 s behind | Relay sent one 100-row batch per 500 ms tick, a hard cap of 200 events/s | Keep draining full batches (bounded at 50 per tick), 500-row batches |
+| Ledger still 5.5 s behind | One consumer thread, three partitions | `concurrency: 3`. Order still holds per card because events are keyed by card id |
+| ~80% of high-load charges scored by rules, not the model | One Python process in fraud-service; cold workers timed out after restarts | 3 uvicorn workers on httptools + uvloop, and a warm-up at startup |
+
+The fraud-service fix revisits a Phase 3 decision (#43). `--workers` had caused a 40 ms stall because the default HTTP parser (h11) didn't set `TCP_NODELAY`, so Nagle's algorithm held back small packets. httptools sets it, so multiple workers are now safe. We re-measured: 0.5 ms median, no stall. **Decisions are revisited when the facts change, and the measurement is what makes that safe.**
+
+### Observability
+- **Metrics:** `/actuator/prometheus` (Java, Micrometer) and `/metrics` (Python). Three kinds:
+  - **counter** = only goes up (authorizations by status / band / `scored_by`)
+  - **gauge** = a current value (outbox backlog, circuit open)
+  - **histogram/timer** = distribution of durations (fraud scoring, HTTP latency), from which p95 is computed
+- Labels are small fixed sets (status, band). Never card ids or amounts: each distinct label value creates a new time series (**cardinality**), and ids would also leak data.
+- **Logs:** JSON (ECS format) in Compose, each line with `correlationId`. To follow one charge: `docker logs cardflow-authorization | grep <id>`, then the same in ledger.
+- No Grafana yet (owner's choice); the endpoints are ready for Phase 7. [ADR 0013](adr/0013-observability.md).
+
+### Security checks
+- **On every PR:** `npm audit --audit-level=high` (dashboard) and `pip-audit` (the three Python projects).
+- **On main, weekly and on demand:** Trivy scans every built image for CRITICAL CVEs that have a fix.
+- Dependabot keeps versions moving; baseline at the end of Phase 6: **0 known vulnerabilities**.
+
+### Smaller images
+- Java runtime switched to `eclipse-temurin:25-jre-alpine`: ledger and authorization images **611 / 619 MB → 469 MB** each. The non-root user is now created with Alpine's `addgroup` / `adduser`, and healthchecks use `wget`, since there's no `curl` in Alpine.
+- Still large: assistant 828 MB (the embedding model and ONNX runtime) and fraud 597 MB (numpy, xgboost). They're big because of what they need, not because of waste.
+
+### One-command demo
+`make demo` = create `.env` → build and start everything → replay 5 days of synthetic traffic for 60 cards (after 6 warm-up days of history) with fraud episodes. About 40 s after the images are built, the review queue has real flagged items: 437 approved, 64 fraud declines and 10 pending review on the run we recorded. The README's GIF was captured from that state by `dashboard/scripts/demo-capture.mjs`.
+
+### Gotchas we hit
+1. **My first backlog measurement was wrong.** It drained during startup, before the load started, so the number meant nothing. I threw it out and used the breakpoint run. Check that you're measuring what you think you are.
+2. **Zero errors can hide a degraded system.** At 400 req/s there were no errors, but only 34% of charges were scored by the model. The `scored_by` breakdown exposed it.
+3. **Cold start shows up in demos.** The first assistant question took 2.6 s (loading the embedding model). A warm-up at startup brought it to 336 ms. The same applied to fraud-service after restarts.
+4. **Node resolves modules from the script's location**, not your working directory. The capture script had to live inside `dashboard/` to find Playwright.
+5. **Version tags drift.** The k6 image and the GitHub Actions versions in my head were outdated. Look them up instead of trusting memory.
