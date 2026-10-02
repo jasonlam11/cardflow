@@ -63,8 +63,9 @@ def replay(client: AuthorizationClient, path: str, from_day: int, warmup_days: i
             stats["tp" if fraud and flagged else "fn" if fraud else "fp" if flagged else "tn"] += 1
             stats[result] += 1
             if results_path:
-                results.append({**r, "outcome": result, "score": resp.json().get("fraudScore", "")
-                                if resp.status_code < 300 else ""})
+                fraud = (resp.json().get("fraud") or {}) if resp.status_code < 300 else {}
+                results.append({**r, "outcome": result, "score": fraud.get("score", ""),
+                                "scored_by": fraud.get("scoredBy", "")})
         else:
             stats["warmup_sent"] += 1
 
