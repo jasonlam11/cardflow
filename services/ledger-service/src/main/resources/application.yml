@@ -14,6 +14,11 @@ spring:
     locations: classpath:db/migration
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    listener:
+      # One consumer thread per partition of transactions.authorized (3). Events are keyed by
+      # card, so each card's events stay in order; account creation is conflict-safe.
+      # Measured: 1 thread left approval->ledger at p95 5.5 s under 600 req/s.
+      concurrency: 3
     consumer:
       group-id: ledger-service
       # A brand-new consumer group starts from the oldest retained event, not "now"

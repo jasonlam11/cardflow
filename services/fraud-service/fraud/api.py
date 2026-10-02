@@ -75,6 +75,17 @@ class ScoreResponse(BaseModel):
     modelVersion: str
 
 
+def _warm_up(model: FraudModel, store: HistoryStore) -> None:
+    """Pay first-call costs (model, numpy, DB connection) before taking traffic. Measured: cold
+    workers answered their first requests past the 300 ms client timeout, which opened the
+    circuit breaker in authorization-service right after every restart."""
+    now = datetime.now(timezone.utc)
+    sample = Txn(ts=now, amount_minor=2_500, mcc="5411", merchant_id="warmup", channel="CARD_PRESENT", lat=40.7, lon=-74.0)
+    for _ in range(5):
+        model.predict(compute_features([], sample))
+    store.recent("warmup", now)
+
+
 def create_app(model: FraudModel | None = None, store: HistoryStore | None = None) -> FastAPI:
     """Factory so tests can inject a model and an in-memory store."""
 
@@ -84,6 +95,7 @@ def create_app(model: FraudModel | None = None, store: HistoryStore | None = Non
         settings = Settings()
         app.state.model = model or FraudModel.load(settings.model_dir)
         app.state.store = store or PostgresHistoryStore(settings.dsn)
+        _warm_up(app.state.model, app.state.store)
         log.info("fraud-service started with model %s", app.state.model.version)
         yield
         if hasattr(app.state.store, "close"):

@@ -1,6 +1,10 @@
 # Runtime (the API image)
 fastapi==0.142.2
 uvicorn==0.54.0
+# Faster HTTP parser + event loop for uvicorn; they set TCP_NODELAY, so multi-worker mode
+# doesn't hit the Nagle stall the pure-Python h11 stack did (see NOTES §10)
+uvloop==0.23.0
+httptools==0.8.0
 xgboost==3.4.1
 numpy==2.5.3
 psycopg[binary]==3.3.6
