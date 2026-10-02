@@ -24,7 +24,11 @@ function Assistant() {
   const [cardId, setCardId] = useState(linked && UUID.test(linked) ? linked : "");
   // Cards seen in recent approved transactions, for the demo "who am I" picker
   const recent = useQuery({ queryKey: ["transactions", "for-assistant"], queryFn: () => api.transactions({ status: "APPROVED" }) });
+  const linkedId = linked && UUID.test(linked) ? linked : null;
+  // A card linked from its page may not be among the recent ones: look it up for its last 4 digits
+  const linkedCard = useQuery({ queryKey: ["card", linkedId], queryFn: () => api.card(linkedId!), enabled: !!linkedId });
   const cards = [...new Map((recent.data?.content ?? []).filter((a) => a.cardId).map((a) => [a.cardId!, a.cardLast4])).entries()];
+  if (linkedId && linkedCard.data && !cards.some(([id]) => id === linkedId)) cards.unshift([linkedId, linkedCard.data.card.last4]);
   const current = cardId || cards[0]?.[0] || "";
 
   return (
@@ -42,7 +46,6 @@ function Assistant() {
           onChange={(e) => setCardId(e.target.value)}
           className="rounded-md border border-slate-300 bg-transparent px-2 py-1 font-mono dark:border-slate-700"
         >
-          {linked && UUID.test(linked) && !cards.some(([id]) => id === linked) && <option value={linked}>{maskCard(null)} (linked)</option>}
           {cards.map(([id, last4]) => (
             <option key={id} value={id}>
               {maskCard(last4)}

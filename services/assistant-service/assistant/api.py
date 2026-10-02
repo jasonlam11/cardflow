@@ -68,6 +68,7 @@ def create_app(assistant: Assistant | None = None, app_info: dict | None = None)
             retriever = Retriever(store, FastEmbedder(), k=settings.top_k)
             chunks = load_chunks(settings.docs_dir)
             retriever.index(chunks)
+            retriever.retrieve("warm-up")  # first query loads the ONNX session; don't make a user wait for it
             llm = make_llm(settings)
             app.state.assistant = Assistant(llm, retriever, HttpLedger(settings.ledger_url), settings.max_rounds)
             app.state.store = store
