@@ -41,6 +41,15 @@ public class LedgerTransaction implements Persistable<UUID> {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    @Column(name = "merchant_id", length = 64, updatable = false)
+    private String merchantId;
+
+    @Column(name = "merchant_name", length = 200, updatable = false)
+    private String merchantName;
+
+    @Column(length = 4, updatable = false)
+    private String mcc;
+
     @OneToMany(mappedBy = "transaction", cascade = CascadeType.PERSIST)
     @OrderBy("direction DESC, amountMinor DESC")
     private List<LedgerEntry> entries = new ArrayList<>();
@@ -53,6 +62,21 @@ public class LedgerTransaction implements Persistable<UUID> {
         this.description = description;
         this.occurredAt = occurredAt;
         this.createdAt = DbTime.now();
+    }
+
+    /** Merchant context for card charges (set once, before saving). */
+    public void setMerchant(String merchantId, String merchantName, String mcc) {
+        this.merchantId = merchantId;
+        this.merchantName = merchantName;
+        this.mcc = mcc;
+    }
+
+    public String getMerchantName() {
+        return merchantName;
+    }
+
+    public String getMcc() {
+        return mcc;
     }
 
     public void addEntry(UUID accountId, Direction direction, long amountMinor, String currency) {
