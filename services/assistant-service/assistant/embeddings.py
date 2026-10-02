@@ -1,5 +1,6 @@
 """Local text embeddings (no API key, no cost, deterministic)."""
 
+import os
 from typing import Protocol
 
 import numpy as np
@@ -20,7 +21,8 @@ class FastEmbedder:
     def __init__(self, model_name: str = MODEL_NAME):
         from fastembed import TextEmbedding  # imported lazily: loading the model takes a moment
 
-        self.model = TextEmbedding(model_name=model_name)
+        # FASTEMBED_CACHE_PATH points at the model baked into the image, so containers need no network
+        self.model = TextEmbedding(model_name=model_name, cache_dir=os.environ.get("FASTEMBED_CACHE_PATH"))
 
     def embed_documents(self, texts: list[str]) -> np.ndarray:
         return _normalize(np.array(list(self.model.embed(texts)), dtype=np.float32))

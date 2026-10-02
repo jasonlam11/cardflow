@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 COMPOSE := docker compose
 
-.PHONY: help env up build down ps logs reset-db test-ledger test-auth test-sim test-fraud train simulate e2e
+.PHONY: help env up build down ps logs reset-db test-ledger test-auth test-sim test-fraud test-assistant train eval eval-claude simulate e2e
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -31,6 +31,15 @@ test-fraud: ## Run fraud-service tests (incl. model quality gate)
 train: ## Regenerate the synthetic dataset, retrain the fraud model, rewrite the model card
 	cd simulator && python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt && .venv/bin/python -m cardflow_sim dataset --out data/transactions.csv.gz
 	cd services/fraud-service && python3 -m venv .venv && .venv/bin/pip install -q -r requirements-train.txt && .venv/bin/python -m training.train
+
+test-assistant: ## Run assistant-service tests (needs Docker for the pgvector test)
+	cd services/assistant-service && python3 -m venv .venv && .venv/bin/pip install -q -r requirements-dev.txt && .venv/bin/pytest -q
+
+eval: ## Assistant eval with the free demo model (pipeline + retrieval); writes docs/eval-results.md
+	cd services/assistant-service && python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt && .venv/bin/python -m evals.run --min-recall 1.0
+
+eval-claude: ## Assistant eval against Claude: prints the cost estimate; add ARGS=--confirm-cost to actually run (COSTS MONEY)
+	cd services/assistant-service && .venv/bin/python -m evals.run --provider anthropic --model $(or $(MODEL),claude-haiku-4-5) $(ARGS)
 
 simulate: ## Send synthetic traffic (make simulate ARGS="--cards 20 --charges 500 --rate 20")
 	$(COMPOSE) --profile sim run --rm --build simulator $(ARGS)

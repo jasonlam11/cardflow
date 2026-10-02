@@ -31,7 +31,7 @@ updates:
       spring:
         patterns: ["org.springframework*", "org.springdoc*"]
   - package-ecosystem: pip
-    directories: ["/simulator", "/tests/e2e", "/services/fraud-service"]
+    directories: ["/simulator", "/tests/e2e", "/services/fraud-service", "/services/assistant-service"]
     schedule:
       interval: weekly
     commit-message:
