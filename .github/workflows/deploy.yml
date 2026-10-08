@@ -1,0 +1,99 @@
+name: deploy
+
+# Build, push to ECR, and roll out to the EC2 instance through SSM.
+#
+# SWITCHED OFF: every job is skipped unless the repository variable DEPLOY_ENABLED is "true".
+# CardFlow is not currently deployed (AWS costs money), so it never is. To turn it on after
+# `terraform apply` (see README "Deploying to AWS"), set these repository variables:
+#   DEPLOY_ENABLED=true, AWS_DEPLOY_ROLE_ARN, ARTIFACTS_BUCKET, INSTANCE_ID   (from terraform output)
+#
+# Auth is GitHub OIDC: the job gets a short-lived token, AWS exchanges it for temporary
+# credentials for the deploy role, whose trust policy only accepts main of this repository.
+# There are no AWS keys in GitHub secrets.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # needed to request the OIDC token
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false # never interrupt a rollout halfway
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  images:
+    if: vars.DEPLOY_ENABLED == 'true'
+    name: build and push ${{ matrix.service }}
+    runs-on: ubuntu-24.04-arm # native ARM64, same architecture as the Graviton instance
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { service: ledger-service, context: services/ledger-service }
+          - { service: authorization-service, context: services/authorization-service }
+          - { service: fraud-service, context: services/fraud-service }
+          - { service: assistant-service, context: services/assistant-service }
+          - { service: dashboard, context: dashboard }
+          - { service: simulator, context: simulator }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/cardflow/${{ matrix.service }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  rollout:
+    if: vars.DEPLOY_ENABLED == 'true'
+    needs: images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload the release (compose files, Postgres init, deploy script)
+        run: |
+          rel="s3://${{ vars.ARTIFACTS_BUCKET }}/deploy/${GITHUB_SHA}"
+          aws s3 cp docker-compose.yml "$rel/docker-compose.yml"
+          aws s3 cp docker-compose.aws.yml "$rel/docker-compose.aws.yml"
+          aws s3 cp infra/deploy/deploy.sh "$rel/deploy.sh"
+          aws s3 cp --recursive infra/postgres/init "$rel/infra/postgres/init"
+
+      - name: Run the deploy on the instance (SSM, no SSH)
+        id: send
+        run: |
+          rel="s3://${{ vars.ARTIFACTS_BUCKET }}/deploy/${GITHUB_SHA}"
+          dir="/opt/cardflow/releases/${GITHUB_SHA}"
+          params=$(jq -nc --arg rel "$rel" --arg dir "$dir" --arg sha "$GITHUB_SHA" \
+            '{commands: ["set -euo pipefail", "aws s3 sync \($rel)/ \($dir)/ --only-show-errors", "bash \($dir)/deploy.sh \($sha)"], executionTimeout: ["900"]}')
+          id=$(aws ssm send-command --instance-ids "${{ vars.INSTANCE_ID }}" \
+            --document-name AWS-RunShellScript --comment "cardflow ${GITHUB_SHA::7}" \
+            --parameters "$params" --query Command.CommandId --output text)
+          echo "command_id=$id" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for the rollout and show its output
+        run: |
+          id="${{ steps.send.outputs.command_id }}"
+          aws ssm wait command-executed --command-id "$id" --instance-id "${{ vars.INSTANCE_ID }}" || true
+          aws ssm get-command-invocation --command-id "$id" --instance-id "${{ vars.INSTANCE_ID }}" \
+            --query '{status: Status, out: StandardOutputContent, err: StandardErrorContent}' --output json | tee result.json
+          test "$(jq -r .status result.json)" = "Success"

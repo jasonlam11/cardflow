@@ -1,0 +1,72 @@
+# AWS overrides, layered on docker-compose.yml on the EC2 instance:
+#   docker compose -f docker-compose.yml -f docker-compose.aws.yml --env-file .env up -d --wait
+# - images come from ECR (tagged with the commit SHA) instead of being built
+# - only the dashboard publishes a port; everything else is reachable only on the Docker network
+#   (the security group then limits the dashboard to one network)
+# - secrets arrive in .env, written from SSM Parameter Store by deploy/deploy.sh
+# - the assistant uses Claude on Bedrock with the instance role (no API key) and reads its docs
+#   synced from S3
+# - container logs are size-capped so they can't fill the disk
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  postgres:
+    <<: *logging
+    ports: !reset []
+
+  kafka:
+    <<: *logging
+    ports: !reset []
+
+  kafka-init:
+    <<: *logging
+
+  fraud-service:
+    <<: *logging
+    build: !reset null
+    image: ${ECR_REGISTRY:?}/cardflow/fraud-service:${IMAGE_TAG:?}
+    ports: !reset []
+
+  authorization-service:
+    <<: *logging
+    build: !reset null
+    image: ${ECR_REGISTRY:?}/cardflow/authorization-service:${IMAGE_TAG:?}
+    ports: !reset []
+
+  ledger-service:
+    <<: *logging
+    build: !reset null
+    image: ${ECR_REGISTRY:?}/cardflow/ledger-service:${IMAGE_TAG:?}
+    ports: !reset []
+
+  assistant-service:
+    <<: *logging
+    build: !reset null
+    image: ${ECR_REGISTRY:?}/cardflow/assistant-service:${IMAGE_TAG:?}
+    ports: !reset []
+    environment:
+      ASSISTANT_PROVIDER: bedrock
+      BEDROCK_MODEL_ID: ${BEDROCK_MODEL_ID:?}
+      AWS_REGION: ${AWS_REGION:?}
+      DOCS_DIR: /app/docs-s3
+    volumes:
+      - /opt/cardflow/docs:/app/docs-s3:ro
+
+  dashboard:
+    <<: *logging
+    build: !reset null
+    image: ${ECR_REGISTRY:?}/cardflow/dashboard:${IMAGE_TAG:?}
+    # The one public port. Bound on all interfaces here; the security group restricts who can reach it.
+    ports: !override
+      - "${DASHBOARD_PORT:-3000}:3000"
+
+  simulator:
+    <<: *logging
+    build: !reset null
+    image: ${ECR_REGISTRY:?}/cardflow/simulator:${IMAGE_TAG:?}
