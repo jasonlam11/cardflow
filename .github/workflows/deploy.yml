@@ -38,7 +38,7 @@ jobs:
           - { service: ledger-service, context: services/ledger-service }
           - { service: authorization-service, context: services/authorization-service }
           - { service: fraud-service, context: services/fraud-service }
-          - { service: assistant-service, context: services/assistant-service }
+          - { service: assistant-service, context: services/assistant-service, build_args: WITH_BEDROCK=true }
           - { service: dashboard, context: dashboard }
           - { service: simulator, context: simulator }
     steps:
@@ -54,6 +54,7 @@ jobs:
         with:
           context: ${{ matrix.context }}
           platforms: linux/arm64
+          build-args: ${{ matrix.build_args }}
           push: true
           tags: ${{ steps.ecr.outputs.registry }}/cardflow/${{ matrix.service }}:${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.service }}
