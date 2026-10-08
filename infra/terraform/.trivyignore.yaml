@@ -1,0 +1,21 @@
+# Accepted Trivy findings. Each one is a deliberate, cost-driven trade-off, scoped to the
+# exact file and recorded with its reason (see ADR 0014). Anything new still fails the scan.
+misconfigurations:
+  - id: AWS-0104
+    paths: ["app/network.tf"]
+    statement: >-
+      Outbound HTTPS (443 only) to 0.0.0.0/0 is required to reach ECR, SSM, S3 and Bedrock from a
+      public subnet. The alternatives cost money: a NAT gateway (~$33/month) or one VPC
+      endpoint per service (~$7/month each). Inbound stays limited to the dashboard from one network.
+  - id: AVD-AWS-0104
+    paths: ["app/network.tf"]
+    statement: Same finding under its older ID.
+  - id: AWS-0132
+    paths: ["app/s3.tf", "bootstrap/main.tf"]
+    statement: >-
+      Buckets use SSE-S3 (AES-256, keys managed by S3) rather than a customer-managed KMS key
+      (~$1/month per key plus request charges). Both buckets are private, TLS-only, and hold
+      only Terraform state, synthetic benefits docs and compose files.
+  - id: AVD-AWS-0132
+    paths: ["app/s3.tf", "bootstrap/main.tf"]
+    statement: Same finding under its older ID.

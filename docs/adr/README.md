@@ -19,3 +19,5 @@ Each ADR records one significant decision: the context, what we chose, the alter
 | [0011](0011-rag-design.md) | Retrieval-augmented generation: local embeddings, pgvector, section chunks | 5 |
 | [0012](0012-llm-interface-and-guardrails.md) | Provider-agnostic LLM interface with deterministic guardrails around it | 5 |
 | [0013](0013-observability.md) | Prometheus metrics and structured JSON logs, with dashboards deferred | 6 |
+| [0014](0014-ec2-compose-not-ecs.md) | AWS target: one EC2 instance running Docker Compose, written as Terraform but not deployed | 7 |
+| [0015](0015-iam-and-oidc.md) | Least-privilege IAM, GitHub OIDC deploys, and secrets in SSM | 7 |

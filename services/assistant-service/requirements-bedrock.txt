@@ -1,0 +1,3 @@
+# Only in the AWS image (Dockerfile build arg WITH_BEDROCK=true): the Anthropic SDK's Bedrock
+# client, which pulls in boto3/botocore (~90 MB) to sign requests with the instance role.
+anthropic[bedrock]==1.11.0

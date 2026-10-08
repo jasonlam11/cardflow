@@ -2,7 +2,7 @@
 
 **A card-payments platform built as microservices:** charges are authorized exactly once, scored by an explainable fraud model, posted to a double-entry ledger through Kafka, and borderline cases go to a human review queue. An AI assistant answers cardholder questions with cited, guarded answers.
 
-Java 25 · Spring Boot 4 · PostgreSQL 18 · Kafka · Python 3.14 · FastAPI · XGBoost + SHAP · pgvector · Claude · Next.js 16 · Docker · GitHub Actions
+Java 25 · Spring Boot 4 · PostgreSQL 18 · Kafka · Python 3.14 · FastAPI · XGBoost + SHAP · pgvector · Claude · Next.js 16 · Docker · GitHub Actions · Terraform (AWS)
 
 ![Demo: a flagged charge is reviewed and approved, then the assistant answers questions about the card](docs/images/demo.gif)
 
@@ -37,7 +37,8 @@ Then open **http://127.0.0.1:3000**:
 | **Resilience** | fraud-service stopped under load: p95 6.4 ms, 0 errors (circuit breaker + rules fallback) | [ADR 0007](docs/adr/0007-circuit-breaker-fallback.md) |
 | **Human review** | Approve → ledger posted in ~0.5–1.4 s; two analysts deciding at once → exactly one wins | [ADR 0010](docs/adr/0010-human-review-audit-trail.md) |
 | **Assistant** | Retrieval recall@4 **100%** on a 36-question eval; every answer cited or replaced by "I don't know"; 0 injection leaks (demo mode; real-model eval on demand) | [eval results](docs/eval-results.md) |
-| **Tests** | **232** across unit, integration (Testcontainers), browser (Playwright) and end-to-end suites, all in CI | [Testing](#testing) |
+| **Infrastructure as code** | AWS stack in Terraform (EC2, ECR, S3, SSM, least-privilege IAM, GitHub OIDC): 14 policy tests against a mocked provider, tflint and Trivy in CI. Written and tested, **not deployed** ($0) | [Deploying to AWS](#deploying-to-aws-not-currently-deployed) |
+| **Tests** | **265** across unit, integration (Testcontainers), browser (Playwright), end-to-end and infrastructure suites, all in CI | [Testing](#testing) |
 
 ## Architecture
 
@@ -89,8 +90,58 @@ The reasoning behind each choice is recorded as an ADR ([index](docs/adr/README.
 | Human review with an append-only audit trail | The model never has the final word on borderline cases | [0010](docs/adr/0010-human-review-audit-trail.md) |
 | RAG + guardrails in code | Citations and amounts are verified, not trusted; tools are read-only | [0011](docs/adr/0011-rag-design.md), [0012](docs/adr/0012-llm-interface-and-guardrails.md) |
 | Prometheus metrics + JSON logs with correlation IDs | Measure the pipeline, not just the API | [0013](docs/adr/0013-observability.md) |
+| One EC2 instance running Compose, not ECS/EKS/MSK/RDS | ~$56/month on 24/7 (~$3–4 stopped) vs $150+ for managed equivalents | [0014](docs/adr/0014-ec2-compose-not-ecs.md) |
+| GitHub OIDC + least-privilege IAM + SSM secrets | No long-lived AWS keys anywhere; only `main` of this repo can deploy | [0015](docs/adr/0015-iam-and-oidc.md) |
 
 [docs/NOTES.md](docs/NOTES.md) explains how everything works in plain language, with every gotcha we hit along the way.
+
+## Deploying to AWS (not currently deployed)
+
+The AWS infrastructure is complete as code but **deliberately not running**, because running it costs money. Everything below is checked in CI without an AWS account.
+
+```mermaid
+flowchart LR
+    gh[GitHub Actions<br/><i>push to main</i>] -->|OIDC: short-lived token,<br/>no AWS keys| sts[AWS STS]
+    gh -->|ARM64 images,<br/>tagged with commit SHA| ecr[(ECR)]
+    gh -->|compose files + deploy.sh| s3[(S3 artifacts)]
+    gh -->|SSM Run Command<br/>no SSH| ec2
+    subgraph vpc [Default VPC]
+        ec2[EC2 t4g.large<br/>Docker Compose stack]
+    end
+    ec2 -->|instance role| ssm[(SSM Parameter Store<br/>generated secrets)]
+    ec2 --> ecr
+    ec2 --> s3
+    ec2 -->|assistant| bedrock[Bedrock<br/>Claude Haiku 4.5]
+    you((You)) -->|dashboard :3000<br/>your IP only| ec2
+```
+
+- **[`infra/terraform/bootstrap`](infra/terraform/bootstrap):** encrypted, versioned state bucket (native S3 locking), a $10/month budget alert, the GitHub OIDC provider.
+- **[`infra/terraform/app`](infra/terraform/app):**
+  - **Compute:** EC2 running the stack.
+  - **Firewall:** inbound only on the dashboard port, from one network (validated to /24 or narrower); no SSH.
+  - **Storage:** ECR repos (immutable tags, scan on push, lifecycle) and a private artifacts bucket.
+  - **Secrets:** generated SecureString secrets.
+  - **Access:** least-privilege roles for the instance and for deploys.
+- **[`docker-compose.aws.yml`](docker-compose.aws.yml):** images from ECR, only the dashboard published, logs capped, assistant on **Bedrock** via the instance role (no API key).
+- **[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml):** build → ECR → SSM rollout with a health check. Every job is skipped unless `DEPLOY_ENABLED` is set.
+
+**Checked on every PR:**
+- `terraform fmt`, `validate` and 14 `terraform test` runs against a mocked AWS provider. They check only the dashboard port is open, least privilege, OIDC trust limited to `main`, private encrypted buckets, IMDSv2 and no surprise CPU-credit billing.
+- tflint and a Trivy misconfiguration scan, with two accepted, documented exceptions.
+- Tests that render the merged compose config.
+
+Run them locally with `make tf-test` (free, no account).
+
+**What it would cost** (us-east-1): about **$0.07/hour while running** plus ~$3–4/month for the disk and storage while stopped, or ~$56/month left on 24/7 ([ADR 0014](docs/adr/0014-ec2-compose-not-ecs.md)).
+
+<details><summary>How to deploy it (costs money)</summary>
+
+1. AWS account with CLI access; Terraform ≥ 1.11.
+2. `cd infra/terraform/bootstrap && cp terraform.tfvars.example terraform.tfvars` (set your email), then `terraform init && terraform apply`.
+3. `cd ../app && cp terraform.tfvars.example terraform.tfvars` (set `allowed_cidr` to your IP/32), then `terraform init -backend-config="bucket=<state_bucket output>" && terraform apply`.
+4. In the repo settings, set variables `DEPLOY_ENABLED=true`, `AWS_DEPLOY_ROLE_ARN`, `ARTIFACTS_BUCKET`, `INSTANCE_ID` (from `terraform output`). Push to `main` → deploys.
+5. Stop between demos: `aws ec2 stop-instances --instance-ids <id>`. **Tear down:** unset `DEPLOY_ENABLED`, then `terraform destroy` in `app/`. The bootstrap stack's state bucket is protected from accidental deletion; empty it and remove `prevent_destroy` to delete it too.
+</details>
 
 ## Testing
 
@@ -99,12 +150,13 @@ The reasoning behind each choice is recorded as an ADR ([index](docs/adr/README.
 | ledger-service | Double-entry rules (incl. raw-SQL DB constraint tests), consumer dedupe, DLT | `make test-ledger` | 51 |
 | authorization-service | Idempotency, row locking under concurrency, outbox under Kafka outage, circuit breaker, review conflicts | `make test-auth` | 59 |
 | fraud-service | Feature math, API, Postgres history, **model quality gate** (retrains from scratch) | `make test-fraud` | 28 |
-| assistant-service | Guardrails against a scripted misbehaving model, tool scope, retrieval, pgvector | `make test-assistant` | 38 |
+| assistant-service | Guardrails against a scripted misbehaving model, tool scope, retrieval, pgvector, Bedrock client (faked) | `make test-assistant` | 52 |
 | simulator | Dataset realism and determinism | `make test-sim` | 17 |
 | dashboard | Components, BFF input handling (Vitest); review + chat flows in a real browser (Playwright) | `npm test`, `npm run test:e2e` | 26 + 9 |
 | end-to-end | Exactly-once under retries, Kafka outage, fraud-service outage | `make e2e` | 4 |
+| infrastructure | Terraform security properties (mocked AWS), AWS compose override | `make tf-test`, `pytest tests/infra` | 14 + 5 |
 
-CI runs every suite on each pull request, plus a free assistant eval, dependency audits, and weekly container image scans.
+CI runs every suite on each pull request, plus a free assistant eval, dependency audits, Terraform lint and misconfiguration scans, and weekly container image scans.
 
 ## Repository map
 
@@ -118,7 +170,8 @@ dashboard/                 Next.js ops UI (BFF route handlers in src/app/api)
 simulator/                 synthetic traffic, labeled datasets, replay
 perf/                      k6 load tests + pipeline report
 tests/e2e/                 end-to-end tests against the compose stack
-infra/                     Postgres init, Terraform (Phase 7)
+infra/                     Postgres init, Terraform (AWS), deploy script
+tests/infra/               AWS compose override tests
 docs/                      ADRs, NOTES, model card, eval results, performance
 ```
 
@@ -127,7 +180,7 @@ docs/                      ADRs, NOTES, model card, eval results, performance
 - [docs/performance.md](docs/performance.md): load-test method, results, bottlenecks fixed
 - [docs/model-card.md](docs/model-card.md): fraud model data, metrics, limitations
 - [docs/eval-results.md](docs/eval-results.md): assistant eval
-- [PLAN.md](PLAN.md) and [PROGRESS.md](PROGRESS.md): the roadmap and status. **Phases 0–6 are done; Phase 7 (AWS with Terraform) is next.**
+- [PLAN.md](PLAN.md) and [PROGRESS.md](PROGRESS.md): the roadmap and status. **All 8 phases are done.** Phase 7's AWS infrastructure is written and tested but not deployed, to keep the project free.
 
 <details><summary>Service ports (local)</summary>
 

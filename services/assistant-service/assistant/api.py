@@ -49,6 +49,10 @@ def make_llm(settings: Settings):
         provider = "anthropic" if has_credentials() else "demo"
     if provider == "anthropic":
         return AnthropicLLM(model=settings.model)
+    if provider == "bedrock":
+        from .llm.bedrock_client import BedrockLLM
+
+        return BedrockLLM(model=settings.bedrock_model_id, region=settings.aws_region)
     return DemoLLM()
 
 

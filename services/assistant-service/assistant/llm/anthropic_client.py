@@ -22,6 +22,8 @@ def has_credentials() -> bool:
 
 class AnthropicLLM:
     name = "anthropic"
+    # Top-level automatic prompt caching (Claude API only; Bedrock needs explicit breakpoints)
+    auto_cache = True
 
     def __init__(self, model: str = "claude-haiku-4-5", max_tokens: int = 4096, timeout_s: float = 30.0):
         self.model = model
@@ -30,17 +32,14 @@ class AnthropicLLM:
         self.client = anthropic.Anthropic(timeout=timeout_s, max_retries=2)
 
     def respond(self, system: str, turns: list[Turn], tools: list[dict]) -> LLMResponse:
+        request = dict(model=self.model, max_tokens=self.max_tokens, system=system, tools=tools,
+                       messages=[self._message(t) for t in turns])
+        if self.auto_cache:
+            # Automatic prompt caching of the stable prefix (system + tools). Note: Haiku 4.5 only
+            # caches prefixes of 4096+ tokens, so this may report zero cache reads; the eval shows it.
+            request["cache_control"] = {"type": "ephemeral"}
         try:
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                system=system,
-                tools=tools,
-                messages=[self._message(t) for t in turns],
-                # Automatic prompt caching of the stable prefix (system + tools). Note: Haiku 4.5 only
-                # caches prefixes of 4096+ tokens, so this may report zero cache reads; the eval shows it.
-                cache_control={"type": "ephemeral"},
-            )
+            response = self.client.messages.create(**request)
         except anthropic.AuthenticationError as e:
             raise LLMUnavailable("LLM credentials rejected") from e
         except anthropic.RateLimitError as e:

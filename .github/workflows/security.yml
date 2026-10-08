@@ -24,7 +24,11 @@ jobs:
           node-version-file: dashboard/.nvmrc
       - name: npm audit (dashboard)
         working-directory: dashboard
-        run: npm audit --audit-level=high
+        # Blocks on anything that ships (runtime dependencies). Dev-only tooling (linters, test
+        # runners) never reaches the image and processes only our own files, so it's reported, not blocking.
+        run: |
+          npm audit --omit=dev --audit-level=high
+          npm audit --audit-level=high || echo "::warning::dev-only dependencies have advisories (not shipped); see npm audit"
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"

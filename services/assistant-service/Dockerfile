@@ -2,8 +2,11 @@ FROM python:3.14.7-slim
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 FASTEMBED_CACHE_PATH=/app/models HF_HUB_DISABLE_TELEMETRY=1
 
-COPY requirements.txt .
+COPY requirements.txt requirements-bedrock.txt ./
 RUN pip install --no-cache-dir --retries 10 --timeout 60 -r requirements.txt
+# AWS builds add the Bedrock client (boto3); local images stay smaller without it
+ARG WITH_BEDROCK=false
+RUN if [ "$WITH_BEDROCK" = "true" ]; then pip install --no-cache-dir --retries 10 --timeout 60 -r requirements-bedrock.txt; fi
 
 # Bake the embedding model into the image: no download at startup, no network needed at runtime
 RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='BAAI/bge-small-en-v1.5', cache_dir='/app/models')"

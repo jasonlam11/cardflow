@@ -1,0 +1,77 @@
+name: infra
+
+# Static checks only (Terraform and the AWS compose override). No AWS credentials exist in this workflow and nothing is deployed:
+# the tests run against a mocked AWS provider.
+on:
+  pull_request:
+    paths: ["infra/**", "docker-compose*.yml", "tests/infra/**", ".github/workflows/terraform.yml"]
+  push:
+    branches: [main]
+    paths: ["infra/**", "docker-compose*.yml", "tests/infra/**", ".github/workflows/terraform.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: fmt, validate, test (${{ matrix.stack }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        stack: [bootstrap, app]
+    defaults:
+      run:
+        working-directory: infra/terraform/${{ matrix.stack }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.4
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate
+      - run: terraform test
+
+  lint:
+    name: tflint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v7
+      - uses: terraform-linters/setup-tflint@v6
+        with:
+          tflint_version: v0.64.0
+      - run: tflint --init --config "$PWD/.tflint.hcl"
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # avoids GitHub API rate limits when downloading the AWS ruleset
+      - run: tflint --recursive --config "$PWD/.tflint.hcl" --format compact
+
+  misconfig:
+    name: trivy config scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Scan Terraform for security misconfigurations
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: infra/terraform
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+        env:
+          TRIVY_IGNOREFILE: infra/terraform/.trivyignore.yaml # accepted findings, each with its reason
+
+  compose-aws:
+    name: AWS compose override
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - run: pip install pytest==9.1.1
+      - run: pytest -q tests/infra
+
