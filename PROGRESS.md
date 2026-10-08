@@ -1,6 +1,6 @@
 # Progress
 
-## Current phase: 6, polish (performance, observability, docs)
+## Current phase: 7, AWS infrastructure as code (written and tested, not deployed)
 
 ### Session log
 
@@ -67,9 +67,21 @@
   - Fresh-clone stranger test: fixed a repeat-`make demo` idempotency-key collision and a flaky cold pip install
   - Freed 6.6 GB (Docker build cache) when disk hit 1.3 GB free
 
+- Phase 6 merged (PR #15)
+- AWS account created; enabling IAM Identity Center created an Organization, which auto-upgraded it from the Free plan to Paid with $0 credits (irreversible). Owner chose: no deployment, keep the project free. Zero-spend budget alert set; account holds no resources
+- Installed Terraform 1.16.4 (official HashiCorp build, checksum-verified) and AWS CLI 2.37.10; freed 1.1 GB (Homebrew cache)
+- **Phase 7** (branch `phase-7-aws`, written and tested, **not deployed**):
+  - Terraform bootstrap stack: encrypted versioned state bucket (native S3 locking), $10 budget alert, GitHub OIDC provider
+  - Terraform app stack: t4g.large running Compose in the default VPC (no NAT/ALB), security group with only the dashboard port from one /24-or-narrower network and no SSH, ECR (immutable, scan on push, lifecycle), private artifacts bucket with the benefits docs, generated SecureString secrets in SSM, least-privilege instance role, deploy role trusted only for `main`
+  - 14 `terraform test` runs against a mocked AWS provider (mutation-checked); tflint; Trivy config scan with 2 scoped, justified exceptions
+  - `docker-compose.aws.yml` + 5 tests; `infra/deploy/deploy.sh` (SSM -> .env, S3 docs, compose pull/up, health check); deploy workflow (OIDC, ARM64 images, SSM rollout), every job skipped unless `DEPLOY_ENABLED`
+  - Assistant: `BedrockLLM` (SDK's AnthropicBedrock, instance-role auth, no automatic caching), boto3 only in the AWS image, 14 tests with a fake client
+  - npm audit now blocks on runtime deps only (new `braces` advisory, no fix, dev-only via eslint-config-next)
+  - ADR 0014 (EC2 + Compose, not deployed), ADR 0015 (IAM, OIDC, SSM secrets); NOTES §14
+
 ### Next
-- [ ] CI green on Phase 6 PR, then merge
-- [ ] Phase 7 plan: AWS with Terraform (cost estimate and approval before creating anything)
+- [ ] CI green on Phase 7 PR, then merge
+- [ ] Optional, costs money: deploy for real (`terraform apply`, ~$0.07/hour) to measure deploy time and prove the AMI/IMDS/Bedrock path
 - [ ] Add an Anthropic API key and run `make eval-claude ARGS=--confirm-cost` for real-model metrics (~$0.50 on Haiku 4.5)
 - [ ] Explain-back questions for Phases 2–5 (YOUR TURN)
 - [x] PR #1 merged (Phase 0 complete)
@@ -89,14 +101,17 @@
 - One Python e2e failure right after a stack restart (not reproduced in 3 runs; likely cold fraud workers, now warmed up at startup)
 - Disk is tight (~7 GB free after pruning); Docker build cache regrows with every build
 - Above ~200 req/s on the laptop, fraud-service saturates and charges fall back to rules (by design; visible in metrics)
-- No Grafana/Prometheus server yet (deferred to Phase 7)
+- No Grafana/Prometheus server (endpoints exist; a hosted scraper comes with a real deployment)
+- AWS infrastructure is unproven against real AWS: AMI boot, IMDS hop limit with containers, Bedrock calls, deploy timing
+- Single EC2 instance would be a single point of failure (Postgres/Kafka on one EBS volume, no snapshots)
+- Homebrew refuses installs until the Command Line Tools are updated (`sudo xcode-select --install`, needs disk space)
 
 ## Metrics (real, measured numbers only)
 
 | Metric | Value | Measured |
 |---|---|---|
 | Services | 5 (ledger, authorization, fraud, assistant, dashboard) + simulator | 2026-10-02 |
-| Total tests | **232**, all passing: ledger 51, authorization 59, fraud 28, assistant 38, simulator 17, dashboard unit 26, Playwright 9, e2e 4 | 2026-10-02 |
+| Total tests | **265**: ledger 51, authorization 59, fraud 28, assistant 52, simulator 17, dashboard unit 26, Playwright 9, e2e 4, Terraform 14, compose-aws 5 | 2026-10-08 |
 | p95 authorization latency | **28.9 ms** at 200 req/s for 2 min (p50 4.4 ms, p99 141.9 ms, 0 errors, 23,986 authorizations, 91.6% ML-scored); 15.3 ms at 100 req/s after a restart (99.9% ML-scored) | 2026-10-02 |
 | Throughput (req/s) | **200 req/s** with ML scoring (100% model-scored); HTTP layer to ~600 req/s before p95 > 200 ms (rules fallback above ~200) | 2026-10-02 |
 | Approval → ledger posting at 200 req/s | p50 321 ms / p95 509 ms; 0 unpublished, 0 duplicates | 2026-10-02 |
@@ -113,5 +128,6 @@
 | Human review: Approve click -> ledger posted | 0.45-1.4 s (Playwright, 4 runs) | 2026-10-02 |
 | Fraud scoring latency | in-process p50 0.39 ms / p95 0.46 ms; HTTP call from authorization ~5 ms (was ~47 ms before the Nagle fix) | 2026-10-02 |
 | Assistant eval (36 questions) | Demo mode: retrieval recall@4 100%, citation rate 100%, injection/PII resistance 100%, $0. Real-model metrics pending an API key | 2026-10-02 |
-| Deploy time push → live | – | |
-| Monthly AWS cost | – | |
+| Deploy time push → live | – (not deployed, to stay free) | |
+| Monthly AWS cost | **$0** (infrastructure written and tested, not deployed); estimate if deployed: ~$0.07/hour running + ~$3–4/month stopped, ~$56/month 24/7 | 2026-10-08 |
+| Terraform policy tests | 14 offline tests (bootstrap 4, app 10), mutation-checked; tflint + Trivy in CI | 2026-10-08 |
