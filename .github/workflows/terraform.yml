@@ -61,6 +61,8 @@ jobs:
           scan-ref: infra/terraform
           severity: HIGH,CRITICAL
           exit-code: "1"
+        env:
+          TRIVY_IGNOREFILE: infra/terraform/.trivyignore.yaml # accepted findings, each with its reason
 
   compose-aws:
     name: AWS compose override
