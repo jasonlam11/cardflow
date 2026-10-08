@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 COMPOSE := docker compose
 
-.PHONY: help demo env up build down ps logs reset-db test-ledger test-auth test-sim test-fraud test-assistant train eval eval-claude simulate e2e perf perf-breakpoint
+.PHONY: help demo env up build down ps logs reset-db test-ledger test-auth test-sim test-fraud test-assistant train eval eval-claude simulate e2e perf perf-breakpoint tf-test
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -63,6 +63,13 @@ perf: ## k6 steady load against the running stack (RATE=100 DURATION=2m), then t
 perf-breakpoint: ## k6 ramp until p95 > 200 ms or errors > 1% (finds max sustainable req/s)
 	docker run --rm -i --network cardflow_default -v "$(CURDIR)/perf:/perf" -e MAX_RATE=$(or $(MAX_RATE),600) \
 	  grafana/k6:2.3.0 run --summary-export /perf/results/breakpoint.json /perf/breakpoint.js
+
+tf-test: ## Terraform fmt/validate/test for both stacks, offline against a mocked AWS (free, no account)
+	@for d in infra/terraform/bootstrap infra/terraform/app; do \
+	  echo "== $$d"; \
+	  (cd $$d && terraform fmt -check -recursive && terraform init -backend=false -input=false >/dev/null \
+	    && terraform validate && terraform test) || exit 1; \
+	done
 
 down: ## Stop the stack (keeps data)
 	$(COMPOSE) down

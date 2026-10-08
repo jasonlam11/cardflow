@@ -1,0 +1,22 @@
+#!/bin/bash
+# First boot only: install Docker and the Compose plugin. Releases are deployed later by the
+# GitHub workflow through SSM (deploy/deploy.sh), so this script never needs to change.
+set -euo pipefail
+
+dnf install -y docker
+systemctl enable --now docker
+
+# Compose plugin, pinned and checksum-verified
+COMPOSE_VERSION="v5.6.0"
+BASE="https://github.com/docker/compose/releases/download/$${COMPOSE_VERSION}"
+mkdir -p /usr/local/lib/docker/cli-plugins
+cd /usr/local/lib/docker/cli-plugins
+curl -fsSLO "$${BASE}/docker-compose-linux-aarch64"
+curl -fsSLO "$${BASE}/docker-compose-linux-aarch64.sha256"
+sha256sum -c docker-compose-linux-aarch64.sha256
+mv docker-compose-linux-aarch64 docker-compose && rm docker-compose-linux-aarch64.sha256
+chmod +x docker-compose
+
+mkdir -p /opt/cardflow
+echo "AWS_REGION=${region}" > /opt/cardflow/bootstrap.env
+echo "SSM_PREFIX=${ssm_prefix}" >> /opt/cardflow/bootstrap.env
