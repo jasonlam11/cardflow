@@ -15,6 +15,9 @@
 	<description>CardFlow double-entry ledger service</description>
 	<properties>
 		<java.version>25</java.version>
+		<!-- Spring Boot 4.1.1 ships Tomcat 11.0.24 (CVE-2026-65182, CVE-2026-65905, CVE-2026-68525, all CRITICAL).
+		     Pinned to the fixed patch until a Spring Boot release includes it; remove then. -->
+		<tomcat.version>11.0.26</tomcat.version>
 		<springdoc.version>3.1.1</springdoc.version>
 	</properties>
 	<dependencies>
