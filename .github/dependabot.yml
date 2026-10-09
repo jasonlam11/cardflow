@@ -42,6 +42,11 @@ updates:
       interval: weekly
     commit-message:
       prefix: chore
+    ignore:
+      # Types must match the Node major we run (24: .nvmrc and the node:24-alpine image).
+      # Bump this together with the runtime, not on its own.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       next-react:
         patterns: ["next", "react", "react-dom", "eslint-config-next", "@types/react*"]
