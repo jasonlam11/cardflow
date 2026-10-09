@@ -14,7 +14,7 @@ def store():
     from assistant.store import PgVectorStore
 
     try:
-        container = pg.PostgresContainer("pgvector/pgvector:0.8.6-pg18-trixie", driver=None).start()
+        container = pg.PostgresContainer("pgvector/pgvector:0.8.7-pg18-trixie", driver=None).start()
     except Exception as e:  # pragma: no cover
         pytest.skip(f"Docker unavailable: {e}")
     dsn = (f"host={container.get_container_host_ip()} port={container.get_exposed_port(5432)} "
