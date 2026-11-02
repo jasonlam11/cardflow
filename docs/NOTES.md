@@ -241,6 +241,8 @@ Short version of every decision, newest at the bottom. The big ones also get a f
 | 78 | Bedrock via the SDK's `AnthropicBedrock`, boto3 only in the AWS image | Reuses the Claude client; instance role auth; small local images | boto3 Converse API; boto3 everywhere | [0012](adr/0012-llm-interface-and-guardrails.md) |
 | 79 | Trivy exceptions in a scoped, reasoned ignore file | Cost-driven trade-offs stay visible; anything new still fails | Lower the severity threshold; inline ignores | [0014](adr/0014-ec2-compose-not-ecs.md) |
 | 80 | npm audit blocks on runtime deps, warns on dev-only | Dev tooling never ships (standalone image) | Block on everything; ignore advisories | – |
+| 81 | Accept pillow CVEs in assistant-service until fastembed allows pillow 13; one root `.trivyignore` with `exp:` dates feeds Trivy and pip-audit | Fix needs pillow 13, fastembed caps it below 13; we only embed text, so the image decoders never run; expiry forces a recheck | Force pillow 13 past fastembed's pin; drop fastembed | – |
+| 82 | Upgrade pip in the Python Dockerfiles | The base image's pip vendored certifi with compromised CA roots; our own certifi was already fixed | Wait for a new `python` image; remove pip from the image | – |
 
 ---
 
@@ -770,6 +772,8 @@ The fraud-service fix revisits a Phase 3 decision (#43). `--workers` had caused 
 - **On every PR:** `npm audit --audit-level=high` (dashboard) and `pip-audit` (the three Python projects).
 - **On main, weekly and on demand:** Trivy scans every built image for CRITICAL CVEs that have a fix.
 - Dependabot keeps versions moving; baseline at the end of Phase 6: **0 known vulnerabilities**.
+- **Accepted risks** live in the root `.trivyignore`: one ID per line with a reason above it and an `exp:` date. Trivy reads it directly. The pip-audit step turns the unexpired lines into `--ignore-vuln` flags. After the date, both checks fail again until someone rechecks. (The Terraform scan keeps its own `infra/terraform/.trivyignore.yaml`.)
+- **Lesson (2026-11-02):** Trivy flagged a vulnerable `certifi` that wasn't ours. It was the copy vendored inside the base image's pip. The "Target" column said only `Python` instead of a `site-packages/...` path, which was the clue. Dependabot can't see that kind of finding, because it lives in the base image, not in a requirements file.
 
 ### Smaller images
 - Java runtime switched to `eclipse-temurin:25-jre-alpine`: ledger and authorization images **611 / 619 MB → 469 MB** each. The non-root user is now created with Alpine's `addgroup` / `adduser`, and healthchecks use `wget`, since there's no `curl` in Alpine.

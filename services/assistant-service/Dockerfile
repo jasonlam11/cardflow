@@ -2,6 +2,8 @@ FROM python:3.14.7-slim
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 FASTEMBED_CACHE_PATH=/app/models HF_HUB_DISABLE_TELEMETRY=1
 
+# The base image ships pip 26.2.1, whose vendored certifi has the compromised emSign roots (GHSA-6q48-6c7w-9gw2)
+RUN pip install --no-cache-dir --retries 10 --timeout 60 pip==26.2.2
 COPY requirements.txt requirements-bedrock.txt ./
 RUN pip install --no-cache-dir --retries 10 --timeout 60 -r requirements.txt
 # AWS builds add the Bedrock client (boto3); local images stay smaller without it

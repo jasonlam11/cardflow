@@ -1,0 +1,47 @@
+# Accepted risks. Read by Trivy (image scan) and by the pip-audit step in .github/workflows/security.yml.
+# Every entry needs a reason and an exp: date; Trivy fails again after that date, which forces a recheck.
+
+# pillow 12.3.0 in assistant-service (fixed in 13.0.0)
+# Why accepted: pillow is only there because fastembed imports it at package load, and every
+# fastembed release (0.8.1, 0.9.0) requires pillow<13. We only use TextEmbedding, which never
+# decodes images, so the vulnerable decoders (TIFF, JPEG, FlashPix, Ghostscript...) never run.
+# Remove when fastembed allows pillow>=13. Added 2026-11-02.
+CVE-2026-112390 exp:2027-02-01
+CVE-2026-112391 exp:2027-02-01
+CVE-2026-112392 exp:2027-02-01
+CVE-2026-112393 exp:2027-02-01
+CVE-2026-112394 exp:2027-02-01
+CVE-2026-112395 exp:2027-02-01
+CVE-2026-112396 exp:2027-02-01
+CVE-2026-112397 exp:2027-02-01
+CVE-2026-112398 exp:2027-02-01
+CVE-2026-112399 exp:2027-02-01
+CVE-2026-112400 exp:2027-02-01
+CVE-2026-112401 exp:2027-02-01
+CVE-2026-112402 exp:2027-02-01
+CVE-2026-112403 exp:2027-02-01
+CVE-2026-112404 exp:2027-02-01
+CVE-2026-112405 exp:2027-02-01
+CVE-2026-112406 exp:2027-02-01
+CVE-2026-112891 exp:2027-02-01
+CVE-2026-112892 exp:2027-02-01
+CVE-2026-112893 exp:2027-02-01
+CVE-2026-112894 exp:2027-02-01
+CVE-2026-112895 exp:2027-02-01
+CVE-2026-112896 exp:2027-02-01
+CVE-2026-112897 exp:2027-02-01
+CVE-2026-112899 exp:2027-02-01
+CVE-2026-112900 exp:2027-02-01
+CVE-2026-112901 exp:2027-02-01
+CVE-2026-114501 exp:2027-02-01
+CVE-2026-96636 exp:2027-02-01
+CVE-2026-96637 exp:2027-02-01
+CVE-2026-96638 exp:2027-02-01
+CVE-2026-96639 exp:2027-02-01
+CVE-2026-96640 exp:2027-02-01
+CVE-2026-96641 exp:2027-02-01
+CVE-2026-96642 exp:2027-02-01
+CVE-2026-96643 exp:2027-02-01
+CVE-2026-96644 exp:2027-02-01
+CVE-2026-96778 exp:2027-02-01
+GHSA-78g4-xqwv-q3g8 exp:2027-02-01
