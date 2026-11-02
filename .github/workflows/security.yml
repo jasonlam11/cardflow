@@ -33,10 +33,14 @@ jobs:
         with:
           python-version: "3.14"
       - name: pip-audit (python services)
+        # Accepted risks come from .trivyignore, the same list the image scan uses. pip-audit has no
+        # expiry dates, so entries past their exp: date are dropped here and fail the audit again.
         run: |
           pip install pip-audit
+          today=$(date +%F)
+          ignores=$(awk -v today="$today" '/^[A-Z]/ { until = $2; sub(/^exp:/, "", until); if (until == "" || until >= today) printf "--ignore-vuln %s ", $1 }' .trivyignore)
           for f in services/fraud-service/requirements.txt services/assistant-service/requirements.txt simulator/requirements.txt; do
-            echo "== $f"; pip-audit -r "$f"
+            echo "== $f"; pip-audit -r "$f" $ignores
           done
 
   image-scan:
@@ -60,4 +64,5 @@ jobs:
           image-ref: cardflow/${{ matrix.service }}:scan
           severity: CRITICAL
           ignore-unfixed: true
+          trivyignores: .trivyignore
           exit-code: "1"
