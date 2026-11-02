@@ -1,6 +1,8 @@
 FROM python:3.14.7-slim
 WORKDIR /app
 
+# The base image ships pip 26.2.1, whose vendored certifi has the compromised emSign roots (GHSA-6q48-6c7w-9gw2)
+RUN pip install --no-cache-dir --retries 10 --timeout 60 pip==26.2.2
 COPY requirements.txt .
 # xgboost-cpu: same package without the GPU/CUDA libraries (~6 MB instead of ~250 MB with dependencies)
 RUN sed 's/^xgboost==/xgboost-cpu==/' requirements.txt > requirements-image.txt \
