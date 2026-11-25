@@ -1,13 +1,13 @@
 # Runtime
-fastapi==0.142.2
+fastapi==0.165.0
 uvicorn==0.54.0
 anthropic==1.11.0
 fastembed==0.9.1
 # Pinned directly (fastembed pulls it in): 13.0.0 fixes the image-decoder CVEs we used to accept
 pillow==13.0.0
-numpy==2.5.3
-pgvector==0.5.0
-psycopg[binary]==3.3.6
+numpy==2.5.5
+pgvector==0.5.1
+psycopg[binary]==3.3.9
 psycopg-pool==3.3.3
 # /metrics in Prometheus format
 prometheus-client==0.26.0
