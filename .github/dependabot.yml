@@ -36,6 +36,11 @@ updates:
       interval: weekly
     commit-message:
       prefix: chore
+    groups:
+      # One PR per directory for routine bumps, so security fixes don't sit in a pile of stale PRs.
+      # Majors still get their own PR.
+      python-minor-patch:
+        update-types: ["minor", "patch"]
   - package-ecosystem: npm
     directory: /dashboard
     schedule:
@@ -52,3 +57,6 @@ updates:
         patterns: ["next", "react", "react-dom", "eslint-config-next", "@types/react*"]
       testing:
         patterns: ["vitest", "@testing-library/*", "jsdom", "@playwright/test"]
+      # Everything else that isn't a major bump (groups match in order, so this one goes last).
+      npm-minor-patch:
+        update-types: ["minor", "patch"]

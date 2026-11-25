@@ -241,8 +241,10 @@ Short version of every decision, newest at the bottom. The big ones also get a f
 | 78 | Bedrock via the SDK's `AnthropicBedrock`, boto3 only in the AWS image | Reuses the Claude client; instance role auth; small local images | boto3 Converse API; boto3 everywhere | [0012](adr/0012-llm-interface-and-guardrails.md) |
 | 79 | Trivy exceptions in a scoped, reasoned ignore file | Cost-driven trade-offs stay visible; anything new still fails | Lower the severity threshold; inline ignores | [0014](adr/0014-ec2-compose-not-ecs.md) |
 | 80 | npm audit blocks on runtime deps, warns on dev-only | Dev tooling never ships (standalone image) | Block on everything; ignore advisories | – |
-| 81 | Accept pillow CVEs in assistant-service until fastembed allows pillow 13; one root `.trivyignore` with `exp:` dates feeds Trivy and pip-audit | Fix needs pillow 13, fastembed caps it below 13; we only embed text, so the image decoders never run; expiry forces a recheck | Force pillow 13 past fastembed's pin; drop fastembed | – |
+| 81 | ~~Accept pillow CVEs~~ (superseded by 83) Accept pillow CVEs in assistant-service until fastembed allows pillow 13; one root `.trivyignore` with `exp:` dates feeds Trivy and pip-audit | Fix needs pillow 13, fastembed caps it below 13; we only embed text, so the image decoders never run; expiry forces a recheck | Force pillow 13 past fastembed's pin; drop fastembed | – |
 | 82 | Upgrade pip in the Python Dockerfiles | The base image's pip vendored certifi with compromised CA roots; our own certifi was already fixed | Wait for a new `python` image; remove pip from the image | – |
+| 83 | fastembed 0.9.1 + pillow 13.0.0 pinned directly; `.trivyignore` emptied | 0.9.1 allows pillow <14, so the CVEs are fixed rather than accepted. Ignores name CVE IDs, so new pillow advisories kept failing the weekly scan (security run #69). Pinning pillow directly lets Dependabot bump it | Keep adding IDs to the ignore list | – |
+| 84 | Next.js 16.4.6; Dependabot groups minor/patch bumps per ecosystem | Next refuses `next build` on a version with known advisories, so stale Next breaks the image build. Grouped PRs stop security fixes from sitting in 19 stale PRs | One PR per package | – |
 
 ---
 
