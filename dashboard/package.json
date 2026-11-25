@@ -19,7 +19,7 @@
     "zod": "4.6.6"
   },
   "devDependencies": {
-    "@playwright/test": "1.63.0",
+    "@playwright/test": "1.65.1",
     "@tailwindcss/postcss": "^4",
     "@testing-library/dom": "^10",
     "@testing-library/react": "16.3.3",
@@ -28,10 +28,10 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
-    "jsdom": "^30",
+    "jsdom": "^31",
     "tailwindcss": "^4",
     "typescript": "^6",
-    "vitest": "5.0.3"
+    "vitest": "5.1.1"
   },
   "engines": {
     "node": ">=24"
